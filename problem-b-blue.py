@@ -55,7 +55,6 @@ class JetBotController:
         self.target_node_id = None
         self.planned_path = None
         self.banned_edges = []
-        self.visited_nodes = {}  # Track how many times we've visited each node
         self.plan_initial_route()
 
         self.latest_scan = None
@@ -379,6 +378,11 @@ class JetBotController:
                 # --- BƯỚC 1: KIỂM TRA TÍN HIỆU ƯU TIÊN CAO (LiDAR) ---
                 # Đây là tín hiệu đáng tin cậy nhất, nếu nó kích hoạt, xử lý ngay.
                 if self.detector.process_detection():
+                    if self.skip_first_detection:
+                        rospy.loginfo("SỰ KIỆN (LiDAR): Bỏ qua detection đầu tiên ở startNode.")
+                        time.sleep(0.5)
+                        self.skip_first_detection = False  # Chỉ bỏ qua một lần
+                        continue
                     rospy.loginfo("SỰ KIỆN (LiDAR): Phát hiện giao lộ. Dừng ngay lập tức.")
                     self.robot.stop()
                     time.sleep(0.5) # Chờ robot dừng hẳn
@@ -386,15 +390,6 @@ class JetBotController:
                     # Cập nhật vị trí hiện tại (đã đến đích) và xử lý
                     self.current_node_id = self.target_node_id
                     rospy.loginfo(f"==> ĐÃ ĐẾN node {self.current_node_id}.")
-
-                    # Track visited nodes
-                    self.visited_nodes[self.current_node_id] = self.visited_nodes.get(self.current_node_id, 0) + 1
-
-                    # Check if we've visited this node twice (turn around)
-                    if self.visited_nodes[self.current_node_id] >= 2:
-                        rospy.logwarn(f"Visited node {self.current_node_id} twice! Performing 180-degree turn.")
-                        self.perform_180_turn()
-                        return
 
                     if self.current_node_id == self.navigator.end_node:
                         rospy.loginfo("ĐÃ ĐẾN ĐÍCH CUỐI CÙNG!")
@@ -441,15 +436,6 @@ class JetBotController:
                     self.current_node_id = self.target_node_id
                     rospy.loginfo(f"==> ĐÃ ĐẾN node {self.current_node_id}.")
 
-                    # Track visited nodes
-                    self.visited_nodes[self.current_node_id] = self.visited_nodes.get(self.current_node_id, 0) + 1
-
-                    # Check if we've visited this node twice (turn around)
-                    if self.visited_nodes[self.current_node_id] >= 2:
-                        rospy.logwarn(f"Visited node {self.current_node_id} twice! Performing 180-degree turn.")
-                        self.perform_180_turn()
-                        return
-
                     if self.current_node_id == self.navigator.end_node:
                         rospy.loginfo("ĐÃ ĐẾN ĐÍCH CUỐI CÙNG!")
                         self._set_state(RobotState.GOAL_REACHED)
@@ -479,16 +465,16 @@ class JetBotController:
                     continue
                 
                 if rospy.get_time() - self.state_change_time > self.LINE_REACQUIRE_TIMEOUT:
-                    rospy.logwarn("Không thể tìm thấy line mới sau khi rời giao lộ. Performing 180-degree turn.")
+                    rospy.logerr("Không thể tìm thấy line mới sau khi rời giao lộ. Dừng lại.")
                     self._set_state(RobotState.DEAD_END)
 
             # ===================================================================
             # TRẠNG THÁI KẾT THÚC (DEAD_END, GOAL_REACHED)
             # ===================================================================
             elif self.current_state == RobotState.DEAD_END:
-                rospy.logwarn("Đã vào ngõ cụt! Performing 180-degree turn.")
-                self.perform_180_turn()
-                continue
+                rospy.logwarn("Đã vào ngõ cụt hoặc gặp lỗi không thể phục hồi. Dừng hoạt động.") 
+                self.robot.stop() 
+                break
             elif self.current_state == RobotState.GOAL_REACHED: 
                 rospy.loginfo("ĐÃ HOÀN THÀNH NHIỆM VỤ. Dừng hoạt động.") 
                 self.robot.stop()
@@ -527,7 +513,7 @@ class JetBotController:
     def submit_sign_detection(self, sign_data):
         """
         Gửi dữ liệu sign detection lên server API.
-
+        
         Args:
             sign_data (dict): Dữ liệu sign với format {
                 'type': 'QR_CODE' hoặc 'MATH_PROBLEM',
@@ -537,14 +523,16 @@ class JetBotController:
             }
         """
         try:
-            api_url = "https://hackathon2025-dev.fpt.edu.vn/api/sign-submissions/submit/"
-
-            # Chuẩn bị payload theo đúng format yêu cầu
+            api_url = f"https://hackathon2025-dev.fpt.edu.vn/api/signs/submit/?token={self.API_TOKEN}"
+            
+            # Chuẩn bị payload
             payload = {
-                'text': sign_data.get('value', ''),
                 'node_id': self.current_node_id,
-                'token': self.API_TOKEN,
-                'map_type': self.MAP_TYPE
+                'timestamp': rospy.get_time(),
+                'sign_type': sign_data.get('type'),
+                'sign_value': sign_data.get('value'),
+                'confidence': sign_data.get('confidence', 1.0),
+                'robot_position': sign_data.get('position', {'x': 0, 'y': 0})
             }
             
             rospy.loginfo(f"🚀 Gửi sign detection lên API: {payload}")
@@ -697,16 +685,11 @@ class JetBotController:
         time.sleep(0.5)
 
         # Check if current node is a LOAD node (Problem B requirement)
-        rospy.loginfo(f"🔍 [DEBUG] handle_intersection() called for node {self.current_node_id}")
         current_node_type = self.get_current_node_type()
-        rospy.loginfo(f"🏷️ [DEBUG] Retrieved node type: '{current_node_type}'")
-
-        if current_node_type and current_node_type.upper() == "LOAD":
-            rospy.loginfo(f"🔄 [PROBLEM B] Detected LOAD node {self.current_node_id}! Executing 35° right turn...")
+        if current_node_type == "LOAD":
+            rospy.loginfo(f"🔄 [PROBLEM B] Detected LOAD node {self.current_node_id}! Executing East-South turn (135° right)...")
             self.handle_load_node()
             return
-        else:
-            rospy.loginfo(f"ℹ️ [DEBUG] Node {self.current_node_id} is not a LOAD node (type: '{current_node_type}'), proceeding with normal intersection handling...")
 
         current_direction = self.DIRECTIONS[self.current_direction_index]
         angle_to_sign = self.ANGLE_TO_FACE_SIGN_MAP.get(current_direction, 0)
@@ -717,70 +700,7 @@ class JetBotController:
         
         # Continue with normal intersection processing
         self.process_intersection_detections(detections)
-
-    def perform_180_turn(self):
-        """
-        Perform a 180-degree turn when encountering dead end or visiting a node twice.
-        Simple algorithm: turn around and continue in opposite direction.
-        """
-        rospy.loginfo("🔄 Performing 180-degree turn...")
-
-        # Stop the robot
-        self.robot.stop()
-        time.sleep(0.5)
-
-        # Perform 180-degree turn
-        self.turn_robot(180, True)
-
-        # Update direction (180 degrees = 2 * 90 degree turns)
-        rospy.loginfo(f"==> New direction after 180° turn: {self.DIRECTIONS[self.current_direction_index].name}")
-
-        # Set target to move back to previous node (opposite direction)
-        if self.planned_path and len(self.planned_path) > 1:
-            # Try to find a previous node to go back to
-            current_index = None
-            try:
-                current_index = self.planned_path.index(self.current_node_id)
-                if current_index > 0:
-                    # Go back to previous node
-                    self.target_node_id = self.planned_path[current_index - 1]
-                    rospy.loginfo(f"🔙 Moving back to previous node: {self.target_node_id}")
-                else:
-                    # We're at start, try to find any neighbor in current direction
-                    self.find_neighbor_in_current_direction()
-            except ValueError:
-                # Current node not in planned path, find neighbor
-                self.find_neighbor_in_current_direction()
-        else:
-            # No planned path, find neighbor in current direction
-            self.find_neighbor_in_current_direction()
-
-        # Continue with line following
-        self._set_state(RobotState.LEAVING_INTERSECTION)
-
-    def find_neighbor_in_current_direction(self):
-        """Find a neighbor node in the current robot direction."""
-        current_direction = self.DIRECTIONS[self.current_direction_index]
-
-        # Convert direction enum to label
-        direction_label = None
-        for label, direction_enum in self.LABEL_TO_DIRECTION_ENUM.items():
-            if direction_enum == current_direction:
-                direction_label = label
-                break
-
-        if direction_label:
-            neighbor = self.navigator.get_neighbor_by_direction(self.current_node_id, direction_label)
-            if neighbor:
-                self.target_node_id = neighbor
-                rospy.loginfo(f"🎯 Found neighbor in {direction_label} direction: {self.target_node_id}")
-            else:
-                rospy.logwarn(f"⚠️ No neighbor found in {direction_label} direction, stopping")
-                self._set_state(RobotState.GOAL_REACHED)  # Stop if no neighbor found
-        else:
-            rospy.logerr("❌ Could not determine direction label")
-            self._set_state(RobotState.GOAL_REACHED)
-
+    
     def turn_robot(self, degrees, update_main_direction=True):
         duration = abs(degrees) / 90.0 * self.TURN_DURATION_90_DEG
         if degrees > 0: 
@@ -803,7 +723,7 @@ class JetBotController:
         time.sleep(0.5)
         self._record_frame()
     
-    def _does_path_exist_in_frame(self, image):
+    def _does__exist_in_frame(self, image):
         if image is None: return False
         roi = image[self.ROI_Y : self.ROI_Y + self.ROI_H, :]
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
@@ -828,53 +748,24 @@ class JetBotController:
         rospy.loginfo(f"[SCAN] Kết quả: {paths}")
         return paths
 
-    def scan_for_available_paths_simple(self):
-        """Simple path scanning - just go straight if possible."""
-        rospy.loginfo("[SCAN] Simple path scanning...")
-        paths = {"straight": True, "right": True, "left": True}  # Assume all paths are available
-        if self.latest_image is not None:
-            paths["straight"] = self._does_path_exist_in_frame(self.latest_image)
-        return paths
-
     def get_current_node_type(self):
         """
         Get the type of the current node from map data.
         Returns the node type (e.g., 'NORMAL', 'LOAD', 'START', 'END') or None if not found.
         """
         try:
-            rospy.loginfo(f"🔍 [DEBUG] Checking node type for current_node_id: {self.current_node_id}")
-
-            # Check if navigator and nodes_data exist
-            if not self.navigator:
-                rospy.logerr("❌ [DEBUG] Navigator is None!")
-                return None
-
-            if not self.navigator.nodes_data:
-                rospy.logerr("❌ [DEBUG] Navigator nodes_data is empty!")
-                return None
-
-            rospy.loginfo(f"📊 [DEBUG] Total nodes in map: {len(self.navigator.nodes_data)}")
-
             node_data = self.navigator.nodes_data.get(self.current_node_id)
-
             if node_data:
-                node_type = node_data.get('type')
-                rospy.loginfo(f"✅ [DEBUG] Node {self.current_node_id} found! Full data: {node_data}")
-                rospy.loginfo(f"🏷️ [DEBUG] Node type: '{node_type}'")
-                return node_type
-            else:
-                rospy.logwarn(f"⚠️ [DEBUG] Node {self.current_node_id} not found in nodes_data!")
-                rospy.loginfo(f"🔍 [DEBUG] Available node IDs: {list(self.navigator.nodes_data.keys())}")
-                return None
-
+                return node_data.get('type')
+            return None
         except Exception as e:
-            rospy.logerr(f"❌ [DEBUG] Error getting current node type: {e}")
+            rospy.logerr(f"Error getting current node type: {e}")
             return None
 
     def handle_load_node(self):
         """
         Handle special behavior when robot reaches a LOAD node (Problem B).
-        Performs 35° right turn, detects image, then turns back -35°.
+        Performs East-South turn (135° right), detects image, and submits information to server.
         """
         try:
             # Submit LOAD node information to API
@@ -885,25 +776,25 @@ class JetBotController:
                 'position': {'x': 0, 'y': 0},
                 'node_id': self.current_node_id,
                 'action': 'east_south_turn'
-            }
+            }   
 
             rospy.loginfo(f"📤 [PROBLEM B] Submitting LOAD node data: {load_data}")
             self.submit_sign_detection(load_data)
 
-            # Perform 35° right turn
-            rospy.loginfo("🔄 [PROBLEM B] Executing 35° right turn...")
-            self.turn_robot(35, False)  # Don't update main direction
+            # Perform East-South turn (135° right turn)
+            rospy.loginfo("🔄 [PROBLEM B] Executing East-South turn (135° right)...")
+            self.turn_robot(135, True)
 
-            # Detect image after turning 35 degrees
+            # Detect image after turning 135 degrees
             detection_result = self.detect_image_after_turn()
             rospy.loginfo(f"🔍 [PROBLEM B] Image detection result: {detection_result}")
 
             # Submit detection result to API
             self.submit_detection_result(detection_result)
 
-            # Turn back -35° to original orientation
-            rospy.loginfo("🔄 [PROBLEM B] Turning back -35° to original orientation...")
-            self.turn_robot(-35, False)  # Don't update main direction
+            # Turn back (opposite direction)
+            rospy.loginfo("🔄 [PROBLEM B] Turning back after detection...")
+            self.turn_robot(-135, True)
 
             # After turning, continue with normal intersection logic
             rospy.loginfo("✅ [PROBLEM B] LOAD node handling completed. Continuing with navigation...")
@@ -916,48 +807,15 @@ class JetBotController:
             # Fall back to normal intersection handling
             self.handle_normal_intersection()
 
-    def find_load_nodes(self):
-        """
-        Find all LOAD nodes in the map.
-        Returns list of LOAD node IDs.
-        """
-        load_nodes = []
-
-        if not self.navigator or not self.navigator.nodes_data:
-            rospy.logerr("❌ Navigator or nodes_data is None/empty")
-            return load_nodes
-
-        for node_id, node_data in self.navigator.nodes_data.items():
-            node_type = node_data.get('type', '')
-
-            # Check for various LOAD node representations (case-insensitive)
-            if node_type.upper() in ['LOAD', 'LOAD_NODE', 'PICKUP', 'CARGO']:
-                load_nodes.append(node_id)
-                rospy.loginfo(f"🏗️ LOAD node found: {node_id} (type: {node_data.get('type')})")
-
-        if not load_nodes:
-            rospy.logwarn("⚠️ No LOAD nodes found in map_z")
-            rospy.loginfo("🔍 Available node types:")
-            node_types = {}
-            for node_id, node_data in self.navigator.nodes_data.items():
-                node_type = node_data.get('type', 'UNKNOWN')
-                if node_type not in node_types:
-                    node_types[node_type] = []
-                node_types[node_type].append(node_id)
-
-            for node_type, nodes in node_types.items():
-                rospy.loginfo(f"  - {node_type}: {nodes}")
-
-        return load_nodes
-
     def find_path_through_all_load_nodes(self, start_node_id, end_node_id, banned_edges=None):
         """
         Find shortest path that goes through all LOAD nodes.
-        Uses TSP (Traveling Salesman Problem) approach.
+        Uses TSP (Traveling Salesman Problem) approach: Start -> optimal order of LOAD nodes -> End.
         """
         try:
-            # Find all LOAD nodes using the new function
-            load_nodes = self.find_load_nodes()
+            # Find all LOAD nodes
+            load_nodes = [node_id for node_id, node_data in self.navigator.nodes_data.items()
+                         if node_data.get('type') == 'LOAD']
 
             rospy.loginfo(f"🏗️ Found LOAD nodes: {load_nodes}")
 
@@ -966,77 +824,180 @@ class JetBotController:
                 rospy.logwarn("No LOAD nodes found, using normal pathfinding")
                 return self.navigator.find_path(start_node_id, end_node_id, banned_edges)
 
-            # Find shortest path through all LOAD nodes
-            # We'll use a greedy approach: start -> nearest_load -> next_nearest_load -> ... -> end
-            remaining_loads = load_nodes.copy()
-            full_path = [start_node_id]
-            current_node = start_node_id
+            # Use TSP to find optimal order of visiting LOAD nodes
+            optimal_order = self.solve_tsp_for_load_nodes(start_node_id, end_node_id, load_nodes)
 
-            # Visit all LOAD nodes in order of shortest distance
-            while remaining_loads:
-                shortest_distance = float('inf')
-                next_load = None
-                next_path = None
+            if not optimal_order:
+                rospy.logerr("❌ TSP failed to find optimal order")
+                return None
 
-                for load_node in remaining_loads:
-                    try:
-                        path_to_load = self.navigator.find_path(current_node, load_node, banned_edges)
-                        if path_to_load and len(path_to_load) < shortest_distance:
-                            shortest_distance = len(path_to_load)
-                            next_load = load_node
-                            next_path = path_to_load
-                    except:
-                        continue
-
-                if next_load and next_path:
-                    # Add path to next LOAD node (excluding current node to avoid duplication)
-                    if len(next_path) > 1:
-                        # Remove duplicates by only adding nodes not already in full_path
-                        for node in next_path[1:]:
-                            if node not in full_path:
-                                full_path.append(node)
-                    current_node = next_load
-                    remaining_loads.remove(next_load)
-                    rospy.loginfo(f"🏗️ Added path to LOAD node {next_load}")
-                else:
-                    rospy.logerr(f"❌ Cannot find path to remaining LOAD nodes: {remaining_loads}")
-                    break
-
-            # Finally, add path from last LOAD node to end
-            if current_node != end_node_id:
-                final_path = self.navigator.find_path(current_node, end_node_id, banned_edges)
-                if final_path and len(final_path) > 1:
-                    # Remove duplicates by only adding nodes not already in full_path
-                    for node in final_path[1:]:
-                        if node not in full_path:
-                            full_path.append(node)
-                else:
-                    rospy.logerr(f"❌ Cannot find path from {current_node} to end {end_node_id}")
-                    return None
-
-            # Final validation to ensure no duplicate nodes in path
-            validated_path = []
-            for node in full_path:
-                if node not in validated_path:
-                    validated_path.append(node)
-                else:
-                    rospy.logwarn(f"⚠️ Duplicate node {node} detected and removed from path")
-
-            rospy.loginfo(f"🏗️ Complete path through all LOAD nodes: {validated_path}")
-            return validated_path
+            # Build complete path: Start -> LOAD nodes in optimal order -> End
+            return self.build_complete_path(start_node_id, end_node_id, optimal_order, banned_edges)
 
         except Exception as e:
             rospy.logerr(f"❌ Error finding path through LOAD nodes: {e}")
             # Fallback to normal pathfinding
             return self.navigator.find_path(start_node_id, end_node_id, banned_edges)
 
+    def solve_tsp_for_load_nodes(self, start_node_id, end_node_id, load_nodes):
+        """
+        Solve TSP to find optimal order of visiting LOAD nodes.
+        Returns the optimal permutation of load_nodes.
+        """
+        try:
+            import itertools
+
+            if len(load_nodes) == 1:
+                return load_nodes
+
+            # For small number of LOAD nodes, try all permutations (brute force)
+            if len(load_nodes) <= 6:  # Factorial grows quickly, limit to 6! = 720 permutations
+                return self.tsp_brute_force(start_node_id, end_node_id, load_nodes)
+            else:
+                # For larger sets, use nearest neighbor heuristic
+                return self.tsp_nearest_neighbor(start_node_id, end_node_id, load_nodes)
+
+        except Exception as e:
+            rospy.logerr(f"❌ Error in TSP solver: {e}")
+            return load_nodes  # Return original order as fallback
+
+    def tsp_brute_force(self, start_node_id, end_node_id, load_nodes):
+        """
+        Brute force TSP: try all possible orders of LOAD nodes.
+        """
+        try:
+            import itertools
+
+            best_order = None
+            best_distance = float('inf')
+
+            rospy.loginfo(f"🔍 TSP: Testing all permutations of {len(load_nodes)} LOAD nodes...")
+
+            # Try all permutations of LOAD nodes
+            for perm in itertools.permutations(load_nodes):
+                total_distance = self.calculate_path_distance(start_node_id, end_node_id, list(perm))
+
+                if total_distance < best_distance:
+                    best_distance = total_distance
+                    best_order = list(perm)
+
+            rospy.loginfo(f"✅ TSP: Best order found with distance {best_distance}: {best_order}")
+            return best_order
+
+        except Exception as e:
+            rospy.logerr(f"❌ Error in brute force TSP: {e}")
+            return load_nodes
+
+    def tsp_nearest_neighbor(self, start_node_id, end_node_id, load_nodes):
+        """
+        Nearest neighbor heuristic for TSP.
+        """
+        try:
+            rospy.loginfo(f"🔍 TSP: Using nearest neighbor heuristic for {len(load_nodes)} LOAD nodes...")
+
+            unvisited = load_nodes.copy()
+            visited_order = []
+            current_node = start_node_id
+
+            while unvisited:
+                nearest_load = None
+                nearest_distance = float('inf')
+
+                for load_node in unvisited:
+                    path = self.navigator.find_path(current_node, load_node)
+                    if path:
+                        distance = len(path) - 1
+                        if distance < nearest_distance:
+                            nearest_distance = distance
+                            nearest_load = load_node
+
+                if nearest_load:
+                    visited_order.append(nearest_load)
+                    unvisited.remove(nearest_load)
+                    current_node = nearest_load
+                else:
+                    rospy.logerr(f"❌ Cannot find path to remaining LOAD nodes: {unvisited}")
+                    break
+
+            rospy.loginfo(f"✅ TSP: Nearest neighbor order: {visited_order}")
+            return visited_order
+
+        except Exception as e:
+            rospy.logerr(f"❌ Error in nearest neighbor TSP: {e}")
+            return load_nodes
+
+    def calculate_path_distance(self, start_node_id, end_node_id, load_order):
+        """
+        Calculate total distance for a given order of LOAD nodes.
+        """
+        try:
+            total_distance = 0
+            current_node = start_node_id
+
+            # Distance through all LOAD nodes in order
+            for load_node in load_order:
+                path = self.navigator.find_path(current_node, load_node)
+                if path:
+                    total_distance += len(path) - 1
+                    current_node = load_node
+                else:
+                    return float('inf')  # Invalid path
+
+            # Distance from last LOAD node to end
+            final_path = self.navigator.find_path(current_node, end_node_id)
+            if final_path:
+                total_distance += len(final_path) - 1
+            else:
+                return float('inf')
+
+            return total_distance
+
+        except Exception as e:
+            rospy.logerr(f"❌ Error calculating path distance: {e}")
+            return float('inf')
+
+    def build_complete_path(self, start_node_id, end_node_id, load_order, banned_edges=None):
+        """
+        Build complete path: Start -> LOAD nodes in optimal order -> End.
+        """
+        try:
+            full_path = [start_node_id]
+            current_node = start_node_id
+
+            # Add path segments through each LOAD node
+            for load_node in load_order:
+                segment_path = self.navigator.find_path(current_node, load_node, banned_edges)
+                if segment_path:
+                    full_path.extend(segment_path[1:])  # Skip first node to avoid duplication
+                    current_node = load_node
+                    rospy.loginfo(f"🏗️ Added optimal path to LOAD node {load_node}")
+                else:
+                    rospy.logerr(f"❌ Cannot find path from {current_node} to LOAD node {load_node}")
+                    return None
+
+            # Add final segment from last LOAD node to end
+            if current_node != end_node_id:
+                final_segment = self.navigator.find_path(current_node, end_node_id, banned_edges)
+                if final_segment:
+                    full_path.extend(final_segment[1:])
+                else:
+                    rospy.logerr(f"❌ Cannot find path from {current_node} to end {end_node_id}")
+                    return None
+
+            rospy.loginfo(f"🏗️ Complete optimal TSP path: {full_path}")
+            return full_path
+
+        except Exception as e:
+            rospy.logerr(f"❌ Error building complete path: {e}")
+            return None
+
     def detect_image_after_turn(self):
         """
-        Detect image after turning 35 degrees.
+        Detect image after turning 135 degrees.
         Currently returns default 'rectangle' string as AI model is not available.
         """
         try:
-            rospy.loginfo("🔍 [PROBLEM B] Detecting image after 35° turn...")
+            rospy.loginfo("🔍 [PROBLEM B] Detecting image after 135° turn...")
 
             # Wait a moment for image to stabilize
             rospy.sleep(1.0)
@@ -1064,7 +1025,7 @@ class JetBotController:
                 'position': {'x': 0, 'y': 0},
                 'node_id': self.current_node_id,
                 'timestamp': rospy.get_time(),
-                'detection_method': '35_degree_turn'
+                'detection_method': '135_degree_turn'
             }
 
             rospy.loginfo(f"📤 [PROBLEM B] Submitting detection result to API: {detection_data}")
@@ -1086,7 +1047,7 @@ class JetBotController:
         Modified to handle the turn back functionality.
         """
         try:
-            # Since we turned 35° and then turned back -35°, robot should be in original orientation
+            # Since we turned 135° and then turned back -135°, robot should be in original orientation
             # No need to update direction index as we're back to original direction
             rospy.loginfo(f"🧭 [PROBLEM B] Robot direction maintained after turn back: {self.DIRECTIONS[self.current_direction_index].name}")
 
@@ -1163,42 +1124,68 @@ class JetBotController:
                 self.publish_data({'type': 'MATH_PROBLEM', 'value': '2+2=4'})
 
         rospy.loginfo("[STEP 3] Lập kế hoạch điều hướng theo bản đồ...")
-        # 3. Simplified Navigation Decision
+        # 3. Lập kế hoạch Điều hướng
         final_decision = None
+        is_deviation = False
 
-        # Priority 1: Prescriptive signs (mandatory directions)
-        if 'N' in prescriptive_cmds: final_decision = self.map_absolute_to_relative('N', current_direction)
-        elif 'E' in prescriptive_cmds: final_decision = self.map_absolute_to_relative('E', current_direction)
-        elif 'S' in prescriptive_cmds: final_decision = self.map_absolute_to_relative('S', current_direction)
-        elif 'W' in prescriptive_cmds: final_decision = self.map_absolute_to_relative('W', current_direction)
-
-        # Priority 2: Check available paths and choose one
-        if final_decision is None:
-            # Scan for available paths
-            available_paths = self.scan_for_available_paths_simple()
-
-            # Prefer straight, then right, then left
-            if available_paths.get('straight', False):
-                final_decision = 'straight'
-            elif available_paths.get('right', False):
-                final_decision = 'right'
-            elif available_paths.get('left', False):
-                final_decision = 'left'
-            else:
-                # No paths available - dead end
-                rospy.logwarn("No paths available - treating as dead end")
+        while True:
+            planned_direction_label = self.navigator.get_next_direction_label(self.current_node_id, self.planned_path)
+            if not planned_direction_label:
+                rospy.logerr("Lỗi kế hoạch: Không tìm thấy bước tiếp theo.")
                 self._set_state(RobotState.DEAD_END)
                 return
 
-        # Check if the intended action is prohibited
-        is_prohibited = (final_decision == 'straight' and 'NS' in prohibitive_cmds) or \
-                       (final_decision == 'right' and 'NE' in prohibitive_cmds) or \
-                       (final_decision == 'left' and 'NW' in prohibitive_cmds)
+            planned_action = self.map_absolute_to_relative(planned_direction_label, current_direction)
+            rospy.loginfo(f"Kế hoạch A* đề xuất: Đi {planned_action} (hướng {planned_direction_label})")
 
-        if is_prohibited:
-            rospy.logwarn(f"Action '{final_decision}' is prohibited! Treating as dead end.")
-            self._set_state(RobotState.DEAD_END)
-            return
+            # Ưu tiên 1: Biển báo bắt buộc
+            intended_action = None
+            if 'L' in prescriptive_cmds: intended_action = 'left'
+            elif 'R' in prescriptive_cmds: intended_action = 'right'
+            elif 'F' in prescriptive_cmds: intended_action = 'straight'
+
+            # Ưu tiên 2: Plan
+            if intended_action is None:
+                intended_action = planned_action
+            else:
+                # Nếu hành động bắt buộc khác với kế hoạch, đánh dấu là đi chệch hướng
+                if intended_action != planned_action:
+                    is_deviation = True
+                    rospy.logwarn(f"CHỆCH HƯỚNG! Biển báo bắt buộc ({intended_action}) khác với kế hoạch ({planned_action}).")
+
+            # 3.3. Veto bởi biển báo cấm
+            is_prohibited = (intended_action == 'straight' and 'NF' in prohibitive_cmds) or \
+                            (intended_action == 'right' and 'NR' in prohibitive_cmds) or \
+                            (intended_action == 'left' and 'NL' in prohibitive_cmds)
+
+            if is_prohibited:
+                rospy.logwarn(f"Hành động dự định '{intended_action}' bị CẤM!")
+
+                # Nếu hành động bị cấm đến từ biển báo bắt buộc -> Lỗi bản đồ
+                if is_deviation:
+                    rospy.logerr("LỖI BẢN ĐỒ! Biển báo bắt buộc mâu thuẫn với biển báo cấm. Không thể đi tiếp.")
+                    self._set_state(RobotState.DEAD_END)
+                    return
+
+                # Nếu hành động bị cấm đến từ kế hoạch A* -> Tìm đường lại
+                banned_edge = (self.current_node_id, self.planned_path[self.planned_path.index(self.current_node_id) + 1])
+                if banned_edge not in self.banned_edges:
+                    self.banned_edges.append(banned_edge)
+
+                rospy.loginfo(f"Thêm cạnh cấm {banned_edge} và tìm đường lại...")
+                new_path = self.navigator.find_path(self.current_node_id, self.navigator.end_node, self.banned_edges)
+
+                if new_path:
+                    self.planned_path = new_path
+                    rospy.loginfo(f"Đã tìm thấy đường đi mới: {self.planned_path}")
+                    continue # Quay lại đầu vòng lặp để kiểm tra với kế hoạch mới
+                else:
+                    rospy.logerr("Không thể tìm đường đi mới sau khi gặp biển cấm.")
+                    self._set_state(RobotState.DEAD_END)
+                    return
+
+            final_decision = intended_action
+            break
 
         # 4. Thực thi quyết định
         if final_decision == 'straight':
@@ -1214,29 +1201,46 @@ class JetBotController:
             self._set_state(RobotState.DEAD_END)
             return
 
-        # 5. Simplified next node determination
-        # Just find a neighbor in the direction we're going
-        new_robot_direction = self.DIRECTIONS[self.current_direction_index]
+        # 5. Cập nhật trạng thái robot sau khi thực hiện
+        # 5.1. Xác định node tiếp theo
+        next_node_id = None
+        if not is_deviation:
+            # Nếu đi theo kế hoạch, chỉ cần lấy node tiếp theo từ path
+            next_node_id = self.planned_path[self.planned_path.index(self.current_node_id) + 1]
+        else:
+            # Nếu chệch hướng, phải tìm node tiếp theo dựa trên hành động đã thực hiện
+            new_robot_direction = self.DIRECTIONS[self.current_direction_index]
 
-        executed_direction_label = None
-        for label, direction_enum in self.LABEL_TO_DIRECTION_ENUM.items():
-            if direction_enum == new_robot_direction:
-                executed_direction_label = label
-                break
+            executed_direction_label = None
+            for label, direction_enum in self.LABEL_TO_DIRECTION_ENUM.items():
+                if direction_enum == new_robot_direction:
+                    executed_direction_label = label
+                    break
 
-        if executed_direction_label is None:
-            rospy.logerr("Cannot determine direction label after turn.")
-            self._set_state(RobotState.DEAD_END)
-            return
+            if executed_direction_label is None:
+                rospy.logerr("Lỗi logic: Không thể tìm thấy label cho hướng đi mới của robot.")
+                self._set_state(RobotState.DEAD_END)
+                return
 
-        next_node_id = self.navigator.get_neighbor_by_direction(self.current_node_id, executed_direction_label)
-        if next_node_id is None:
-            rospy.logwarn("No neighbor found in current direction - treating as dead end.")
-            self._set_state(RobotState.DEAD_END)
-            return
+            next_node_id = self.navigator.get_neighbor_by_direction(self.current_node_id, executed_direction_label)
+            if next_node_id is None:
+                 rospy.logerr("LỖI BẢN ĐỒ! Đã thực hiện rẽ nhưng không có node tương ứng.")
+                 self._set_state(RobotState.DEAD_END)
+                 return
+
+            # Quan trọng: Lập kế hoạch lại từ vị trí mới
+            rospy.loginfo(f"Đã đi chệch kế hoạch. Lập lại đường đi từ node mới {next_node_id}...")
+            new_path = self.navigator.find_path(next_node_id, self.navigator.end_node, self.banned_edges)
+            if new_path:
+                self.planned_path = new_path
+                rospy.loginfo(f"Đường đi mới sau khi chệch hướng: {self.planned_path}")
+            else:
+                rospy.logerr("Không thể tìm đường về đích từ vị trí mới.")
+                self._set_state(RobotState.DEAD_END)
+                return
 
         self.target_node_id = next_node_id
-        rospy.loginfo(f"==> Moving to next node: {self.target_node_id}")
+        rospy.loginfo(f"==> Đang di chuyển đến node tiếp theo: {self.target_node_id}")
         self._set_state(RobotState.LEAVING_INTERSECTION)
 
 def main():
