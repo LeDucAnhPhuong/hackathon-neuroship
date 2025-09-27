@@ -711,10 +711,10 @@ class JetBotController:
             image_info = self.latest_image
             detections = self.detect_with_yolo(image_info)
             self.turn_robot(-angle_to_sign, False)
+            self.process_intersection_detections(detections)
             return
         
         # Continue with normal intersection processing
-        self.process_intersection_detections(detections)
     
     def turn_robot(self, degrees, update_main_direction=True):
         duration = abs(degrees) / 90.0 * self.TURN_DURATION_90_DEG
