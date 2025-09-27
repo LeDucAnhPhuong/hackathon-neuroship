@@ -426,10 +426,10 @@ class JetBotController:
                 if execution_line_center is not None:
                     # An toàn để bám line, vì chúng ta biết phía trước không có giao lộ đột ngột.
                     self.correct_course(execution_line_center)
-                else:
-                    # Trường hợp hiếm: ROI xa thấy line nhưng ROI gần lại không. Dừng lại cho an toàn.
-                    rospy.logwarn("Trạng thái không nhất quán: ROI xa thấy line, ROI gần không thấy. Tạm dừng an toàn.")
-                    self.robot.stop()
+                # else:
+                #     # Trường hợp hiếm: ROI xa thấy line nhưng ROI gần lại không. Dừng lại cho an toàn.
+                #     rospy.logwarn("Trạng thái không nhất quán: ROI xa thấy line, ROI gần không thấy. Tạm dừng an toàn.")
+                #     self.robot.stop()
 
             # ===================================================================
             # TRẠNG THÁI 2: ĐANG TIẾN VÀO GIAO LỘ (APPROACHING_INTERSECTION)
