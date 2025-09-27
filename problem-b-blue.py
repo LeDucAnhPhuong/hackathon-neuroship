@@ -167,7 +167,7 @@ class JetBotController:
         # API Configuration
         self.API_TOKEN = "28b8940a37ed20635f0d72dd1a555520"
         self.MAP_TYPE = "map_z"
-        self.USE_API_MAP = False  # Đặt True để sử dụng API, False để dùng file cục bộ
+        self.USE_API_MAP = True  # Đặt True để sử dụng API, False để dùng file cục bộ
         
         self.LABEL_TO_DIRECTION_ENUM = {'N': Direction.NORTH, 'E': Direction.EAST, 'S': Direction.SOUTH, 'W': Direction.WEST}
         self.VIDEO_OUTPUT_FILENAME = 'jetbot_run.avi'
@@ -943,11 +943,11 @@ class JetBotController:
 
     def plan_path_from_current_position(self):
         """
-        Re-plan path from current position to end node through remaining LOAD nodes.
+        Re-plan path from current position to end node.
         """
         try:
-            rospy.loginfo(f"🗺️ Re-planning path from node {self.current_node_id} to {self.navigator.end_node} through remaining LOAD nodes...")
-            new_path = self.find_path_through_all_load_nodes(
+            rospy.loginfo(f"🗺️ Re-planning path from node {self.current_node_id} to {self.navigator.end_node}...")
+            new_path = self.navigator.find_path(
                 self.current_node_id,
                 self.navigator.end_node,
                 self.banned_edges
@@ -956,9 +956,9 @@ class JetBotController:
             if new_path and len(new_path) > 1:
                 self.planned_path = new_path
                 self.target_node_id = new_path[1]
-                rospy.loginfo(f"✅ New path planned through LOAD nodes: {self.planned_path}. Next target: {self.target_node_id}")
+                rospy.loginfo(f"✅ New path planned: {self.planned_path}. Next target: {self.target_node_id}")
             else:
-                rospy.logerr("❌ Could not find path from current position through LOAD nodes!")
+                rospy.logerr("❌ Could not find path from current position!")
                 self._set_state(RobotState.DEAD_END)
 
         except Exception as e:
