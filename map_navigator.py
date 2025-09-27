@@ -90,19 +90,29 @@ class MapNavigator:
         """
         rospy.loginfo("Đang xử lý dữ liệu map...")
         
+        # Handle different data structures (API vs file format)
+        map_nodes = data.get('nodes', [])
+        if not map_nodes and 'map_data' in data:
+            map_nodes = data['map_data'].get('nodes', [])
+
         # Xử lý nodes
-        for node in data['nodes']:
+        for node in map_nodes:
             self.nodes_data[node['id']] = node
             self.graph.add_node(node['id'], **node)
-            if node['type'] == 'Start':
+            if node['type'] in ['Start', 'START']:
                 self.start_node = node['id']
                 rospy.loginfo(f"🚀 Start node: {node['id']}")
-            elif node['type'] == 'End':
+            elif node['type'] in ['End', 'END']:
                 self.end_node = node['id']
                 rospy.loginfo(f"🎯 End node: {node['id']}")
 
+        # Handle different data structures for edges
+        map_edges = data.get('edges', [])
+        if not map_edges and 'map_data' in data:
+            map_edges = data['map_data'].get('edges', [])
+
         # Xử lý edges
-        for edge in data['edges']:
+        for edge in map_edges:
             if not edge["label"]:
                 edge["label"] = ""
             # Thêm cạnh xuôi và cạnh ngược để robot có thể đi hai chiều
@@ -110,8 +120,8 @@ class MapNavigator:
             opposite_label = self._opposite_direction.get(edge['label'])
             if opposite_label:
                 self.graph.add_edge(edge['target'], edge['source'], label=opposite_label)
-        
-        rospy.loginfo(f"✅ Map đã được load: {len(data['nodes'])} nodes, {len(data['edges'])} edges")
+
+        rospy.loginfo(f"✅ Map đã được load: {len(map_nodes)} nodes, {len(map_edges)} edges")
 
     def _load_map(self, map_file_path):
         """Legacy method - giữ lại để tương thích ngược"""
