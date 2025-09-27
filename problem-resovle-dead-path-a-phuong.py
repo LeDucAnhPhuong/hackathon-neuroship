@@ -95,8 +95,16 @@ class JetBotController:
                         if self.planned_path[i] == self.planned_path[i + 2]:
                             rospy.logwarn(f"CẢNH BÁO: Vẫn còn pattern quay 180° trong đường đi tại {self.planned_path[i:i+3]}")
             else:
-                rospy.logerr("Không tìm thấy đường đi hợp lệ sau khi tránh quay 180°!")
-                self._set_state(RobotState.DEAD_END)
+                rospy.logwarn("Không tìm thấy đường đi hợp lệ sau khi tránh quay 180°. Thử tìm đường vòng...")
+                # Thử tìm đường vòng trước khi kết luận DEAD_END
+                detour_path = self._find_initial_detour_path()
+                if detour_path:
+                    self.planned_path = detour_path
+                    self.target_node_id = self.planned_path[1]
+                    rospy.loginfo(f"Đã tìm thấy đường vòng ban đầu: {self.planned_path}. Đích đến đầu tiên: {self.target_node_id}")
+                else:
+                    rospy.logerr("Không tìm thấy đường đi hợp lệ sau khi tránh quay 180°!")
+                    self._set_state(RobotState.DEAD_END)
         else:
             rospy.logerr("Không tìm thấy đường đi hoặc đường đi quá ngắn!")
             self._set_state(RobotState.DEAD_END)
@@ -253,6 +261,199 @@ class JetBotController:
             rospy.logerr(f"Lỗi khi tìm đường thay thế: {e}")
 
         return None
+
+    def _find_detour_path(self):
+        """
+        Tìm đường vòng khi không thể đi thẳng về đích.
+        CHỈ thử các hướng trái và phải - KHÔNG bao gồm quay 180 độ.
+
+        Returns:
+            Đường đi vòng hoặc None nếu không tìm được
+        """
+        current_direction = self.DIRECTIONS[self.current_direction_index]
+        rospy.loginfo(f"Tìm đường vòng từ node {self.current_node_id}, hướng hiện tại: {current_direction.name}")
+
+        # CHỈ thử hướng trái và phải - KHÔNG thử quay 180°
+        alternative_directions = []
+
+        # Hướng trái (quay trái 90 độ)
+        left_direction_idx = (self.current_direction_index - 1 + 4) % 4
+        left_direction = self.DIRECTIONS[left_direction_idx]
+        alternative_directions.append(('left', left_direction))
+
+        # Hướng phải (quay phải 90 độ)
+        right_direction_idx = (self.current_direction_index + 1) % 4
+        right_direction = self.DIRECTIONS[right_direction_idx]
+        alternative_directions.append(('right', right_direction))
+
+        # Thử từng hướng
+        for direction_name, direction_enum in alternative_directions:
+            rospy.loginfo(f"Thử tìm đường vòng theo hướng {direction_name} ({direction_enum.name})")
+
+            # Chuyển direction enum thành label
+            direction_label = None
+            for label, enum_val in self.LABEL_TO_DIRECTION_ENUM.items():
+                if enum_val == direction_enum:
+                    direction_label = label
+                    break
+
+            if not direction_label:
+                continue
+
+            # Tìm node láng giềng theo hướng này
+            neighbor_node = self.navigator.get_neighbor_by_direction(self.current_node_id, direction_label)
+
+            if neighbor_node is None:
+                rospy.loginfo(f"Không có node láng giềng theo hướng {direction_name}")
+                continue
+
+            # Kiểm tra xem edge này có bị cấm không
+            edge_to_check = (self.current_node_id, neighbor_node)
+            if edge_to_check in self.banned_edges:
+                rospy.loginfo(f"Edge {edge_to_check} đã bị cấm, bỏ qua hướng {direction_name}")
+                continue
+
+            # Thử tìm đường từ node láng giềng đến đích
+            detour_path = self.navigator.find_path(neighbor_node, self.navigator.end_node, self.banned_edges)
+
+            if detour_path and len(detour_path) > 1:
+                # Kết hợp thành đường đi hoàn chỉnh: current -> neighbor -> ... -> destination
+                full_detour_path = [self.current_node_id] + detour_path
+                rospy.loginfo(f"Tìm thấy đường vòng qua hướng {direction_name}: {full_detour_path}")
+
+                # Kiểm tra đường vòng này có hợp lý không (không quá dài)
+                if len(full_detour_path) <= len(self.planned_path) + 3:  # Cho phép dài hơn tối đa 3 bước
+                    return full_detour_path
+                else:
+                    rospy.loginfo(f"Đường vòng qua {direction_name} quá dài ({len(full_detour_path)} bước), tiếp tục tìm")
+            else:
+                rospy.loginfo(f"Không tìm được đường từ {neighbor_node} đến đích")
+
+        rospy.logwarn("Không tìm được đường vòng khả thi nào")
+        return None
+
+    def _find_initial_detour_path(self):
+        """
+        Tìm đường vòng ban đầu khi không thể tránh quay 180° trong plan_initial_route.
+        Xe luôn bắt đầu hướng Đông, CHỈ thử các hướng trái và phải (Bắc, Nam).
+        KHÔNG thử hướng Tây vì đó là quay 180°.
+
+        Returns:
+            Đường đi vòng hoặc None nếu không tìm được
+        """
+        start_node = self.navigator.start_node
+        end_node = self.navigator.end_node
+        rospy.loginfo(f"Tìm đường vòng ban đầu từ {start_node} đến {end_node}")
+
+        # Xe luôn bắt đầu hướng Đông (Direction.EAST = 1)
+        # CHỈ thử Bắc (trái) và Nam (phải) - KHÔNG thử Tây (180°)
+        alternative_directions = [
+            ('north', Direction.NORTH, 'N'),  # Quay trái từ Đông
+            ('south', Direction.SOUTH, 'S')   # Quay phải từ Đông
+        ]
+
+        for direction_name, direction_enum, direction_label in alternative_directions:
+            rospy.loginfo(f"Thử tìm đường vòng ban đầu theo hướng {direction_name} ({direction_label})")
+
+            # Tìm node láng giềng theo hướng này
+            neighbor_node = self.navigator.get_neighbor_by_direction(start_node, direction_label)
+
+            if neighbor_node is None:
+                rospy.loginfo(f"Không có node láng giềng theo hướng {direction_name} từ node start {start_node}")
+                continue
+
+            # Thử tìm đường từ node láng giềng đến đích
+            path_from_neighbor = self.navigator.find_path(neighbor_node, end_node, self.banned_edges)
+
+            if path_from_neighbor and len(path_from_neighbor) > 1:
+                # Kết hợp thành đường đi hoàn chỉnh: start -> neighbor -> ... -> end
+                full_path = [start_node] + path_from_neighbor
+                rospy.loginfo(f"Tìm thấy đường vòng ban đầu qua hướng {direction_name}: {full_path}")
+
+                # Kiểm tra đường này có bao gồm pattern quay 180° không
+                optimized_path = self._avoid_180_degree_turns(full_path)
+                if optimized_path and len(optimized_path) > 1:
+                    rospy.loginfo(f"Đường vòng ban đầu sau tối ưu: {optimized_path}")
+                    return optimized_path
+                else:
+                    rospy.loginfo(f"Đường vòng qua {direction_name} vẫn có quay 180°, tiếp tục tìm")
+            else:
+                rospy.loginfo(f"Không tìm được đường từ {neighbor_node} đến đích {end_node}")
+
+        rospy.logwarn("Không tìm được đường vòng ban đầu khả thi nào")
+        return None
+
+    def _is_truly_dead_end(self):
+        """
+        Kiểm tra xem có thực sự là DEAD_END không bằng cách thử tất cả các hướng có thể.
+        Chỉ khi tất cả hướng đều bị cấm hoặc không có đường đi thì mới là DEAD_END thực sự.
+
+        Returns:
+            True nếu thực sự là DEAD_END, False nếu vẫn còn khả năng
+        """
+        rospy.loginfo(f"Kiểm tra DEAD_END thực sự từ node {self.current_node_id}")
+
+        current_direction = self.DIRECTIONS[self.current_direction_index]
+
+        # Kiểm tra tất cả 4 hướng: thẳng, trái, phải, quay đầu
+        all_directions = [
+            ('straight', current_direction),
+            ('left', self.DIRECTIONS[(self.current_direction_index - 1 + 4) % 4]),
+            ('right', self.DIRECTIONS[(self.current_direction_index + 1) % 4]),
+            ('turn_around', self.DIRECTIONS[(self.current_direction_index + 2) % 4])
+        ]
+
+        viable_paths_count = 0
+
+        for action_name, direction_enum in all_directions:
+            # Bỏ qua luôn hướng quay 180° - không coi là đường khả dụng
+            if action_name == 'turn_around':
+                rospy.loginfo(f"Bỏ qua hướng {action_name} - quay 180° không được coi là đường khả dụng")
+                continue
+
+            # Chuyển direction enum thành label
+            direction_label = None
+            for label, enum_val in self.LABEL_TO_DIRECTION_ENUM.items():
+                if enum_val == direction_enum:
+                    direction_label = label
+                    break
+
+            if not direction_label:
+                continue
+
+            rospy.loginfo(f"Kiểm tra hướng {action_name} ({direction_label})")
+
+            # Tìm node láng giềng theo hướng này
+            neighbor_node = self.navigator.get_neighbor_by_direction(self.current_node_id, direction_label)
+
+            if neighbor_node is None:
+                rospy.loginfo(f"  -> Không có node láng giềng theo hướng {action_name}")
+                continue
+
+            # Kiểm tra xem edge này có bị cấm không
+            edge_to_check = (self.current_node_id, neighbor_node)
+            if edge_to_check in self.banned_edges:
+                rospy.loginfo(f"  -> Edge {edge_to_check} đã bị cấm cho hướng {action_name}")
+                continue
+
+            # Thử tìm đường từ node láng giềng đến đích
+            path_to_destination = self.navigator.find_path(neighbor_node, self.navigator.end_node, self.banned_edges)
+
+            if path_to_destination and len(path_to_destination) > 1:
+                rospy.loginfo(f"  -> Tìm thấy đường khả thi qua hướng {action_name}: {neighbor_node} -> ... -> {self.navigator.end_node}")
+                viable_paths_count += 1
+                rospy.loginfo(f"  -> Đường đi qua {action_name} là khả thi và hợp lệ")
+                return False  # Không phải DEAD_END - tìm thấy ít nhất 1 đường hợp lệ
+            else:
+                rospy.loginfo(f"  -> Không tìm được đường từ {neighbor_node} đến đích cho hướng {action_name}")
+
+        # Chỉ kiểm tra 3 hướng: thẳng, trái, phải. Nếu không có hướng nào khả thi thì là DEAD_END
+        if viable_paths_count == 0:
+            rospy.logerr("Đã kiểm tra 3 hướng (thẳng, trái, phải) - KHÔNG có đường nào khả thi. Đây là DEAD_END thực sự!")
+            return True
+        else:
+            rospy.logwarn(f"Có {viable_paths_count} đường khả thi. Không phải DEAD_END.")
+            return False
 
     def initialize_video_writer(self):
         """Khởi tạo đối tượng VideoWriter."""
@@ -930,18 +1131,26 @@ class JetBotController:
                 banned_edge = (self.current_node_id, self.planned_path[self.planned_path.index(self.current_node_id) + 1])
                 if banned_edge not in self.banned_edges:
                     self.banned_edges.append(banned_edge)
-                
+
                 rospy.loginfo(f"Thêm cạnh cấm {banned_edge} và tìm đường lại...")
                 new_path = self.navigator.find_path(self.current_node_id, self.navigator.end_node, self.banned_edges)
-                
+
                 if new_path:
                     self.planned_path = new_path
                     rospy.loginfo(f"Đã tìm thấy đường đi mới: {self.planned_path}")
                     continue # Quay lại đầu vòng lặp để kiểm tra với kế hoạch mới
                 else:
-                    rospy.logerr("Không thể tìm đường đi mới sau khi gặp biển cấm.")
-                    self._set_state(RobotState.DEAD_END)
-                    return
+                    rospy.logwarn("Không tìm được đường trực tiếp. Thử tìm đường vòng...")
+                    # Thử tìm đường vòng trước khi kết luận DEAD_END
+                    detour_path = self._find_detour_path()
+                    if detour_path:
+                        self.planned_path = detour_path
+                        rospy.loginfo(f"Đã tìm thấy đường vòng: {self.planned_path}")
+                        continue
+                    else:
+                        rospy.logerr("Không thể tìm đường đi mới sau khi gặp biển cấm.")
+                        self._set_state(RobotState.DEAD_END)
+                        return
             
             final_decision = intended_action
             break 
@@ -952,12 +1161,19 @@ class JetBotController:
         elif final_decision == 'right': 
             rospy.loginfo("[FINAL] Decision: Turn RIGHT.") 
             self.turn_robot(90, True)
-        elif final_decision == 'left': 
-            rospy.loginfo("[FINAL] Decision: Turn LEFT.") 
+        elif final_decision == 'left':
+            rospy.loginfo("[FINAL] Decision: Turn LEFT.")
             self.turn_robot(-90, True)
         else:
-            rospy.logwarn("[!!!] DEAD END! No valid paths found.") 
-            self._set_state(RobotState.DEAD_END)
+            rospy.logwarn("[!!!] Không có quyết định cuối cùng! Kiểm tra tất cả khả năng trước khi kết luận DEAD_END...")
+            # Kiểm tra cuối cùng - có thực sự là DEAD_END không?
+            if self._is_truly_dead_end():
+                rospy.logerr("[FINAL] XÁC NHẬN DEAD_END! Tất cả đường đi đều bị cấm hoặc không khả thi.")
+                self._set_state(RobotState.DEAD_END)
+            else:
+                rospy.logwarn("[FINAL] Vẫn còn đường đi khả thi, thử lại...")
+                # Thử lại với logic mở rộng hoặc đặt lại trạng thái
+                return
             return
         
         # 5. Cập nhật trạng thái robot sau khi thực hiện
