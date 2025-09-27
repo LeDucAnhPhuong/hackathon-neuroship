@@ -103,6 +103,8 @@ class MapNavigator:
 
         # Xử lý edges
         for edge in data['edges']:
+            if not edge["label"]:
+                edge["label"] = ""
             # Thêm cạnh xuôi và cạnh ngược để robot có thể đi hai chiều
             self.graph.add_edge(edge['source'], edge['target'], label=edge['label'])
             opposite_label = self._opposite_direction.get(edge['label'])
@@ -193,7 +195,7 @@ class MapNavigator:
         return MapNavigator(api_url=token)
 
     @staticmethod 
-    def create_from_file(map_file_path="map.json"):
+    def create_from_file(map_file_path="map_z.json"):
         """
         Factory method để tạo MapNavigator từ file cục bộ.
         
