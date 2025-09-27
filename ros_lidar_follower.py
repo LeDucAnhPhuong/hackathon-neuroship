@@ -121,6 +121,13 @@ class JetBotController:
         return debug_frame
 
     def setup_parameters(self):
+
+        # Setup Endpoints
+        self.SERVER_BASE_URL = "https://hackathon2025-dev.fpt.edu.vn/"  # URL server
+        self.SUBMIT_ENDPOINT = "/api/sign-submissions/submit"
+        self.TEAM_TOKEN = "your_team_token_here"  # Token xác thực của đội
+        # End setup endpoints
+
         self.WIDTH, self.HEIGHT = 300, 300
         self.BASE_SPEED = 0.16
         self.TURN_SPEED = 0.2
@@ -626,12 +633,12 @@ class JetBotController:
                 # box = item['box']; qr_image = self.latest_image[box[1]:box[3], box[0]:box[2]]
                 # decoded = decode(qr_image)
                 # if decoded: qr_data = decoded[0].data.decode('utf-8'); self.publish_data(...)
-                rospy.loginfo("Found QR Code. Publishing data...")
-                self.publish_data({'type': 'QR_CODE', 'value': 'simulated_data_123'})
+                # rospy.loginfo("Found QR Code. Publishing data...")
+                # self.publish_data({'type': 'QR_CODE', 'value': 'simulated_data_123'})
 
-                # response = requests.post(url, json=data)
+                response = requests.post(url, json=data)
 
-                # print(response.status_code)
+                print(response.status_code)
 
             elif item['class_name'] == 'math_problem':
                 rospy.loginfo("Found Math Problem. Solving and publishing...")
