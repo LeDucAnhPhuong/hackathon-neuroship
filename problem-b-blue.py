@@ -163,7 +163,7 @@ class JetBotController:
         self.current_state = None
         self.DIRECTIONS = [Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST]
         self.current_direction_index = 1
-        self.ANGLE_TO_FACE_SIGN_MAP = {d: a for d, a in zip(self.DIRECTIONS, [45, -45, -135, 135])}
+        self.ANGLE_TO_FACE_SIGN_MAP = {d: a for d, a in zip(self.DIRECTIONS, [-45, 45, 135, -135])}
         self.MAX_CORRECTION_ADJ = 0.12
         self.MAP_FILE_PATH = "map_test_phuong_2.json"
         # API Configuration
