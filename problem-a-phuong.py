@@ -143,7 +143,7 @@ class JetBotController:
         self.LINE_COLOR_LOWER = np.array([0, 0, 0])
         self.LINE_COLOR_UPPER = np.array([180, 255, 75])
 
-        self.INTERSECTION_CLEARANCE_DURATION = 5
+        self.INTERSECTION_CLEARANCE_DURATION = 1.5
         self.INTERSECTION_APPROACH_DURATION = 1.3
 
         self.LINE_REACQUIRE_TIMEOUT = 3.0
