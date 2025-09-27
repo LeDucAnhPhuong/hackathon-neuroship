@@ -147,7 +147,7 @@ class JetBotController:
         self.INTERSECTION_APPROACH_DURATION = 1
 
         self.LINE_REACQUIRE_TIMEOUT = 3.0
-        self.SCAN_PIXEL_THRESHOLD = 100
+        self.SCAN_PIXEL_THRESHOLD = 80
         self.YOLO_MODEL_PATH = "models/best.onnx"
         self.YOLO_CONF_THRESHOLD = 0.6
         self.YOLO_INPUT_SIZE = (640, 640)
@@ -163,11 +163,11 @@ class JetBotController:
         self.current_direction_index = 1
         self.ANGLE_TO_FACE_SIGN_MAP = {d: a for d, a in zip(self.DIRECTIONS, [45, -45, -135, 135])}
         self.MAX_CORRECTION_ADJ = 0.12
-        self.MAP_FILE_PATH = "map.json"
+        self.MAP_FILE_PATH = "map_test_phuong_1.json"
         # API Configuration
         self.API_TOKEN = "28b8940a37ed20635f0d72dd1a555520"
         self.MAP_TYPE = "map_z"
-        self.USE_API_MAP = True  # Đặt True để sử dụng API, False để dùng file cục bộ
+        self.USE_API_MAP = False  # Đặt True để sử dụng API, False để dùng file cục bộ
         
         self.LABEL_TO_DIRECTION_ENUM = {'N': Direction.NORTH, 'E': Direction.EAST, 'S': Direction.SOUTH, 'W': Direction.WEST}
         self.VIDEO_OUTPUT_FILENAME = 'jetbot_run.avi'
