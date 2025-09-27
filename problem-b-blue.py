@@ -705,13 +705,6 @@ class JetBotController:
         if current_node_type == "Load":
             rospy.loginfo(f"🔄 [PROBLEM B] Detected LOAD node {self.current_node_id}! Executing East-South turn (135° right)...")
             self.handle_load_node()
-            current_direction = self.DIRECTIONS[self.current_direction_index]
-            angle_to_sign = self.ANGLE_TO_FACE_SIGN_MAP.get(current_direction, 0)
-            self.turn_robot(angle_to_sign, False)
-            image_info = self.latest_image
-            detections = self.detect_with_yolo(image_info)
-            self.turn_robot(-angle_to_sign, False)
-            self.process_intersection_detections(detections)
             return
 
         # For non-LOAD nodes, skip robot turning and YOLO detection
@@ -808,7 +801,7 @@ class JetBotController:
 
             # Perform East-South turn (135° right turn)
             rospy.loginfo("🔄 [PROBLEM B] Executing East-South turn (135° right)...")
-            self.turn_robot(135, True)
+            self.turn_robot(45, True)
 
             # Detect image after turning 135 degrees
             detection_result = self.detect_image_after_turn()
@@ -819,13 +812,13 @@ class JetBotController:
 
             # Turn back (opposite direction)
             rospy.loginfo("🔄 [PROBLEM B] Turning back after detection...")
-            self.turn_robot(-135, True)
+            self.turn_robot(-45, True)
 
             # After turning, continue with normal intersection logic
             rospy.loginfo("✅ [PROBLEM B] LOAD node handling completed. Continuing with navigation...")
 
             # Update target for next movement
-            self.update_navigation_after_load_turn()
+            # self.update_navigation_after_load_turn()
 
         except Exception as e:
             rospy.logerr(f"❌ Error handling LOAD node: {e}")
