@@ -705,6 +705,13 @@ class JetBotController:
         if current_node_type == "Load":
             rospy.loginfo(f"🔄 [PROBLEM B] Detected LOAD node {self.current_node_id}! Executing East-South turn (135° right)...")
             self.handle_load_node()
+            current_direction = self.DIRECTIONS[self.current_direction_index]
+            angle_to_sign = self.ANGLE_TO_FACE_SIGN_MAP.get(current_direction, 0)
+            self.turn_robot(angle_to_sign, False)
+            image_info = self.latest_image
+            detections = self.detect_with_yolo(image_info)
+            self.turn_robot(-angle_to_sign, False)
+            self.process_intersection_detections(detections)
             return
 
         # For non-LOAD nodes, skip robot turning and YOLO detection
