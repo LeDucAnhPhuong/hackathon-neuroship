@@ -54,6 +54,7 @@ class JetBotController:
         self.current_node_id = self.navigator.start_node
         self.target_node_id = None
         self.planned_path = None
+        self.current_path_index = 0  # Track vị trí hiện tại trong planned_path
         self.banned_edges = []
         self.skip_first_detection = True  # Flag để bỏ qua detection đầu tiên ở startNode
         self.plan_initial_route()
@@ -78,6 +79,7 @@ class JetBotController:
         )
         if self.planned_path and len(self.planned_path) > 1:
             self.target_node_id = self.planned_path[1]
+            self.current_path_index = 0  # Reset path index
             rospy.loginfo(f"Đã tìm thấy đường đi qua LOAD nodes: {self.planned_path}. Đích đến đầu tiên: {self.target_node_id}")
         else:
             rospy.logerr("Không tìm thấy đường đi hoặc đường đi quá ngắn!")
@@ -390,7 +392,14 @@ class JetBotController:
 
                     # Cập nhật vị trí hiện tại (đã đến đích) và xử lý
                     self.current_node_id = self.target_node_id
-                    rospy.loginfo(f"==> ĐÃ ĐẾN node {self.current_node_id}.")
+                    # Cập nhật current_path_index
+                    if self.planned_path and self.current_node_id in self.planned_path:
+                        # Tìm vị trí tiếp theo của current_node_id sau current_path_index
+                        for i in range(self.current_path_index + 1, len(self.planned_path)):
+                            if self.planned_path[i] == self.current_node_id:
+                                self.current_path_index = i
+                                break
+                    rospy.loginfo(f"==> ĐÃ ĐẾN node {self.current_node_id} (path index: {self.current_path_index}).")
 
                     if self.current_node_id == self.navigator.end_node:
                         rospy.loginfo("ĐÃ ĐẾN ĐÍCH CUỐI CÙNG!")
@@ -435,7 +444,14 @@ class JetBotController:
                     time.sleep(0.5)
 
                     self.current_node_id = self.target_node_id
-                    rospy.loginfo(f"==> ĐÃ ĐẾN node {self.current_node_id}.")
+                    # Cập nhật current_path_index
+                    if self.planned_path and self.current_node_id in self.planned_path:
+                        # Tìm vị trí tiếp theo của current_node_id sau current_path_index
+                        for i in range(self.current_path_index + 1, len(self.planned_path)):
+                            if self.planned_path[i] == self.current_node_id:
+                                self.current_path_index = i
+                                break
+                    rospy.loginfo(f"==> ĐÃ ĐẾN node {self.current_node_id} (path index: {self.current_path_index}).")
 
                     if self.current_node_id == self.navigator.end_node:
                         rospy.loginfo("ĐÃ ĐẾN ĐÍCH CUỐI CÙNG!")
@@ -1136,7 +1152,7 @@ class JetBotController:
         is_deviation = False
 
         while True:
-            planned_direction_label = self.navigator.get_next_direction_label(self.current_node_id, self.planned_path)
+            planned_direction_label = self.navigator.get_next_direction_label(self.current_node_id, self.planned_path, self.current_path_index)
             if not planned_direction_label:
                 rospy.logerr("Lỗi kế hoạch: Không tìm thấy bước tiếp theo.")
                 self._set_state(RobotState.DEAD_END)

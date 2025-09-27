@@ -172,20 +172,31 @@ class MapNavigator:
         except nx.NetworkXNoPath:
             return None
 
-    def get_next_direction_label(self, current_node_id, path):
+    def get_next_direction_label(self, current_node_id, path, current_path_index=None):
         """
         Từ đường đi đã cho, xác định hướng đi tiếp theo (N, E, S, W) từ node hiện tại.
+        current_path_index: vị trí hiện tại trong path để xử lý trường hợp node lặp lại
         """
         if not path or current_node_id not in path:
             return None
-        
-        current_index = path.index(current_node_id)
+
+        # Nếu không có current_path_index, tìm tất cả vị trí của current_node_id
+        if current_path_index is None:
+            # Tìm vị trí đầu tiên (default behavior để tương thích ngược)
+            current_index = path.index(current_node_id)
+        else:
+            # Sử dụng vị trí được chỉ định
+            if current_path_index >= len(path) or path[current_path_index] != current_node_id:
+                rospy.logerr(f"Invalid path index {current_path_index} for node {current_node_id}")
+                return None
+            current_index = current_path_index
+
         if current_index + 1 >= len(path):
             return None # Đã đến đích
 
         next_node_id = path[current_index + 1]
         edge_data = self.graph.get_edge_data(current_node_id, next_node_id)
-        rospy.loginfo(f"Next direction from {current_node_id} to {next_node_id}: {edge_data.get('label', None)}")
+        rospy.loginfo(f"Next direction from {current_node_id} to {next_node_id} (index {current_index}): {edge_data.get('label', None)}")
         return edge_data.get('label', None)
     
     def get_neighbor_by_direction(self, current_node_id, direction_label):
