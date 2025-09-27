@@ -680,11 +680,16 @@ class JetBotController:
         time.sleep(0.5)
 
         # Check if current node is a LOAD node (Problem B requirement)
+        rospy.loginfo(f"🔍 [DEBUG] handle_intersection() called for node {self.current_node_id}")
         current_node_type = self.get_current_node_type()
-        if current_node_type == "LOAD":
+        rospy.loginfo(f"🏷️ [DEBUG] Retrieved node type: '{current_node_type}'")
+
+        if current_node_type and current_node_type.upper() == "LOAD":
             rospy.loginfo(f"🔄 [PROBLEM B] Detected LOAD node {self.current_node_id}! Executing 35° right turn...")
             self.handle_load_node()
             return
+        else:
+            rospy.loginfo(f"ℹ️ [DEBUG] Node {self.current_node_id} is not a LOAD node (type: '{current_node_type}'), proceeding with normal intersection handling...")
 
         current_direction = self.DIRECTIONS[self.current_direction_index]
         angle_to_sign = self.ANGLE_TO_FACE_SIGN_MAP.get(current_direction, 0)
@@ -749,12 +754,33 @@ class JetBotController:
         Returns the node type (e.g., 'NORMAL', 'LOAD', 'START', 'END') or None if not found.
         """
         try:
+            rospy.loginfo(f"🔍 [DEBUG] Checking node type for current_node_id: {self.current_node_id}")
+
+            # Check if navigator and nodes_data exist
+            if not self.navigator:
+                rospy.logerr("❌ [DEBUG] Navigator is None!")
+                return None
+
+            if not self.navigator.nodes_data:
+                rospy.logerr("❌ [DEBUG] Navigator nodes_data is empty!")
+                return None
+
+            rospy.loginfo(f"📊 [DEBUG] Total nodes in map: {len(self.navigator.nodes_data)}")
+
             node_data = self.navigator.nodes_data.get(self.current_node_id)
+
             if node_data:
-                return node_data.get('type')
-            return None
+                node_type = node_data.get('type')
+                rospy.loginfo(f"✅ [DEBUG] Node {self.current_node_id} found! Full data: {node_data}")
+                rospy.loginfo(f"🏷️ [DEBUG] Node type: '{node_type}'")
+                return node_type
+            else:
+                rospy.logwarn(f"⚠️ [DEBUG] Node {self.current_node_id} not found in nodes_data!")
+                rospy.loginfo(f"🔍 [DEBUG] Available node IDs: {list(self.navigator.nodes_data.keys())}")
+                return None
+
         except Exception as e:
-            rospy.logerr(f"Error getting current node type: {e}")
+            rospy.logerr(f"❌ [DEBUG] Error getting current node type: {e}")
             return None
 
     def handle_load_node(self):
