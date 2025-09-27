@@ -129,7 +129,7 @@ class JetBotController:
 
     def setup_parameters(self):
         self.WIDTH, self.HEIGHT = 300, 300
-        self.BASE_SPEED = 0.3 # 0.16
+        self.BASE_SPEED = 0.16 # 0.16
         self.TURN_SPEED = 0.3
         self.TURN_DURATION_90_DEG = 0.5
         self.ROI_Y = int(self.HEIGHT * 0.85)
@@ -144,7 +144,7 @@ class JetBotController:
         self.LINE_COLOR_UPPER = np.array([180, 255, 75])
 
         self.INTERSECTION_CLEARANCE_DURATION = 1.5
-        self.INTERSECTION_APPROACH_DURATION = 0.3 #0.8
+        self.INTERSECTION_APPROACH_DURATION = 0.8 #0.8
 
         self.LINE_REACQUIRE_TIMEOUT = 3.0
         self.SCAN_PIXEL_THRESHOLD = 80
