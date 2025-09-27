@@ -717,10 +717,16 @@ class JetBotController:
                 rospy.sleep(1.0 / self.VIDEO_FPS)
 
         self.robot.stop()
-        if update_main_direction and degrees % 90 == 0 and degrees != 0:
-            num_turns = round(degrees / 90)
-            self.current_direction_index = (self.current_direction_index + num_turns + 4) % 4
-            rospy.loginfo(f"==> Hướng đi MỚI: {self.DIRECTIONS[self.current_direction_index].name}")
+        if update_main_direction and degrees != 0:
+            if abs(degrees) == 180:
+                # Quay 180° thì đổi ngược hướng (+ 2 directions)
+                self.current_direction_index = (self.current_direction_index + 2) % 4
+                rospy.loginfo(f"==> Hướng đi MỚI sau quay 180°: {self.DIRECTIONS[self.current_direction_index].name}")
+            elif degrees % 90 == 0:
+                # Quay 90° hoặc 270°
+                num_turns = round(degrees / 90)
+                self.current_direction_index = (self.current_direction_index + num_turns + 4) % 4
+                rospy.loginfo(f"==> Hướng đi MỚI: {self.DIRECTIONS[self.current_direction_index].name}")
         time.sleep(0.5)
         self._record_frame()
     
