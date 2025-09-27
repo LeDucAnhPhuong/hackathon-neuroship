@@ -163,7 +163,7 @@ class JetBotController:
         self.current_state = None
         self.DIRECTIONS = [Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST]
         self.current_direction_index = 1
-        self.ANGLE_TO_FACE_SIGN_MAP = {d: a for d, a in zip(self.DIRECTIONS, [-45, 45, 135, -135])}
+        self.ANGLE_TO_FACE_SIGN_MAP = {d: a for d, a in zip(self.DIRECTIONS, [-45, 45, -45, 45])}
         self.MAX_CORRECTION_ADJ = 0.12
         self.MAP_FILE_PATH = "map_test_phuong_2.json"
         # API Configuration
@@ -705,14 +705,13 @@ class JetBotController:
         if current_node_type == "LOAD":
             rospy.loginfo(f"🔄 [PROBLEM B] Detected LOAD node {self.current_node_id}! Executing East-South turn (135° right)...")
             self.handle_load_node()
+            current_direction = self.DIRECTIONS[self.current_direction_index]
+            angle_to_sign = self.ANGLE_TO_FACE_SIGN_MAP.get(current_direction, 0)
+            self.turn_robot(angle_to_sign, False)
+            image_info = self.latest_image
+            detections = self.detect_with_yolo(image_info)
+            self.turn_robot(-angle_to_sign, False)
             return
-
-        current_direction = self.DIRECTIONS[self.current_direction_index]
-        angle_to_sign = self.ANGLE_TO_FACE_SIGN_MAP.get(current_direction, 0)
-        self.turn_robot(angle_to_sign, False)
-        image_info = self.latest_image
-        detections = self.detect_with_yolo(image_info)
-        self.turn_robot(-angle_to_sign, False)
         
         # Continue with normal intersection processing
         self.process_intersection_detections(detections)
