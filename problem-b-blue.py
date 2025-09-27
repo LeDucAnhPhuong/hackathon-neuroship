@@ -508,7 +508,7 @@ class JetBotController:
     def submit_sign_detection(self, sign_data):
         """
         Gửi dữ liệu sign detection lên server API.
-        
+
         Args:
             sign_data (dict): Dữ liệu sign với format {
                 'type': 'QR_CODE' hoặc 'MATH_PROBLEM',
@@ -518,16 +518,14 @@ class JetBotController:
             }
         """
         try:
-            api_url = f"https://hackathon2025-dev.fpt.edu.vn/api/signs/submit/?token={self.API_TOKEN}"
-            
-            # Chuẩn bị payload
+            api_url = "https://hackathon2025-dev.fpt.edu.vn/api/sign-submissions/submit/"
+
+            # Chuẩn bị payload theo đúng format yêu cầu
             payload = {
+                'text': sign_data.get('value', ''),
                 'node_id': self.current_node_id,
-                'timestamp': rospy.get_time(),
-                'sign_type': sign_data.get('type'),
-                'sign_value': sign_data.get('value'),
-                'confidence': sign_data.get('confidence', 1.0),
-                'robot_position': sign_data.get('position', {'x': 0, 'y': 0})
+                'token': self.API_TOKEN,
+                'map_type': self.MAP_TYPE
             }
             
             rospy.loginfo(f"🚀 Gửi sign detection lên API: {payload}")
@@ -902,7 +900,11 @@ class JetBotController:
 
                 if next_load and next_path:
                     # Add path to next LOAD node (excluding current node to avoid duplication)
-                    full_path.extend(next_path[1:])
+                    if len(next_path) > 1:
+                        # Remove duplicates by only adding nodes not already in full_path
+                        for node in next_path[1:]:
+                            if node not in full_path:
+                                full_path.append(node)
                     current_node = next_load
                     remaining_loads.remove(next_load)
                     rospy.loginfo(f"🏗️ Added path to LOAD node {next_load}")
@@ -913,14 +915,25 @@ class JetBotController:
             # Finally, add path from last LOAD node to end
             if current_node != end_node_id:
                 final_path = self.navigator.find_path(current_node, end_node_id, banned_edges)
-                if final_path:
-                    full_path.extend(final_path[1:])  # Exclude current node
+                if final_path and len(final_path) > 1:
+                    # Remove duplicates by only adding nodes not already in full_path
+                    for node in final_path[1:]:
+                        if node not in full_path:
+                            full_path.append(node)
                 else:
                     rospy.logerr(f"❌ Cannot find path from {current_node} to end {end_node_id}")
                     return None
 
-            rospy.loginfo(f"🏗️ Complete path through all LOAD nodes: {full_path}")
-            return full_path
+            # Final validation to ensure no duplicate nodes in path
+            validated_path = []
+            for node in full_path:
+                if node not in validated_path:
+                    validated_path.append(node)
+                else:
+                    rospy.logwarn(f"⚠️ Duplicate node {node} detected and removed from path")
+
+            rospy.loginfo(f"🏗️ Complete path through all LOAD nodes: {validated_path}")
+            return validated_path
 
         except Exception as e:
             rospy.logerr(f"❌ Error finding path through LOAD nodes: {e}")
@@ -1104,9 +1117,20 @@ class JetBotController:
                     return
 
                 # Nếu hành động bị cấm đến từ kế hoạch A* -> Tìm đường lại
-                banned_edge = (self.current_node_id, self.planned_path[self.planned_path.index(self.current_node_id) + 1])
-                if banned_edge not in self.banned_edges:
-                    self.banned_edges.append(banned_edge)
+                try:
+                    current_index = self.planned_path.index(self.current_node_id)
+                    if current_index + 1 < len(self.planned_path):
+                        banned_edge = (self.current_node_id, self.planned_path[current_index + 1])
+                        if banned_edge not in self.banned_edges:
+                            self.banned_edges.append(banned_edge)
+                    else:
+                        rospy.logerr("Lỗi: current_node_id ở cuối planned_path, không thể tìm next node")
+                        self._set_state(RobotState.DEAD_END)
+                        return
+                except ValueError:
+                    rospy.logerr(f"Lỗi: current_node_id {self.current_node_id} không có trong planned_path {self.planned_path}")
+                    self._set_state(RobotState.DEAD_END)
+                    return
 
                 rospy.loginfo(f"Thêm cạnh cấm {banned_edge} và tìm đường lại...")
                 new_path = self.navigator.find_path(self.current_node_id, self.navigator.end_node, self.banned_edges)
@@ -1142,7 +1166,18 @@ class JetBotController:
         next_node_id = None
         if not is_deviation:
             # Nếu đi theo kế hoạch, chỉ cần lấy node tiếp theo từ path
-            next_node_id = self.planned_path[self.planned_path.index(self.current_node_id) + 1]
+            try:
+                current_index = self.planned_path.index(self.current_node_id)
+                if current_index + 1 < len(self.planned_path):
+                    next_node_id = self.planned_path[current_index + 1]
+                else:
+                    rospy.logerr("Lỗi: current_node_id ở cuối planned_path, không thể tìm next node")
+                    self._set_state(RobotState.DEAD_END)
+                    return
+            except ValueError:
+                rospy.logerr(f"Lỗi: current_node_id {self.current_node_id} không có trong planned_path {self.planned_path}")
+                self._set_state(RobotState.DEAD_END)
+                return
         else:
             # Nếu chệch hướng, phải tìm node tiếp theo dựa trên hành động đã thực hiện
             new_robot_direction = self.DIRECTIONS[self.current_direction_index]
