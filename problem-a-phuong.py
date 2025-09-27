@@ -167,7 +167,7 @@ class JetBotController:
         # API Configuration
         self.API_TOKEN = "28b8940a37ed20635f0d72dd1a555520"
         self.MAP_TYPE = "map_z"
-        self.USE_API_MAP = False  # Đặt True để sử dụng API, False để dùng file cục bộ
+        self.USE_API_MAP = True  # Đặt True để sử dụng API, False để dùng file cục bộ
         
         self.LABEL_TO_DIRECTION_ENUM = {'N': Direction.NORTH, 'E': Direction.EAST, 'S': Direction.SOUTH, 'W': Direction.WEST}
         self.VIDEO_OUTPUT_FILENAME = 'jetbot_run.avi'
