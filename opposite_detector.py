@@ -20,7 +20,7 @@ class SimpleOppositeDetector:
         self.angle_range = 20.0
         self.detection_interval = 2.0
         self.opposite_tolerance = 5.0
-        self.min_opposite_distance = 45.0
+        self.min_opposite_distance = 90.0
         self.min_distance_between_objects = 0.4  # Khoảng cách tối thiểu giữa 2 vật (m)
         self.distance_symmetry_tolerance = 0.05  # Sai số khoảng cách đối xứng (5%) 15%
         self.clear_path_ratio_threshold = 0.7  # 70% vùng giữa phải trống 
@@ -153,7 +153,7 @@ class SimpleOppositeDetector:
         scan = self.latest_scan
         timestamp = rospy.get_time()
         all_objects = self.find_all_objects(scan)
-        # if len(all_objects) < 2: return False
+        if len(all_objects) < 2: return False
 
         opposite_pairs = self.find_opposite_pairs(all_objects, scan)
 
