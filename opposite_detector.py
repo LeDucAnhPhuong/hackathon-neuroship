@@ -153,7 +153,7 @@ class SimpleOppositeDetector:
         scan = self.latest_scan
         timestamp = rospy.get_time()
         all_objects = self.find_all_objects(scan)
-        if len(all_objects) < 2: return False
+        # if len(all_objects) < 2: return False
 
         opposite_pairs = self.find_opposite_pairs(all_objects, scan)
 
