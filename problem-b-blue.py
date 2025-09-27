@@ -802,15 +802,48 @@ class JetBotController:
             # Fall back to normal intersection handling
             self.handle_normal_intersection()
 
+    def find_load_nodes(self):
+        """
+        Find all LOAD nodes in the map.
+        Returns list of LOAD node IDs.
+        """
+        load_nodes = []
+
+        if not self.navigator or not self.navigator.nodes_data:
+            rospy.logerr("❌ Navigator or nodes_data is None/empty")
+            return load_nodes
+
+        for node_id, node_data in self.navigator.nodes_data.items():
+            node_type = node_data.get('type', '')
+
+            # Check for various LOAD node representations (case-insensitive)
+            if node_type.upper() in ['LOAD', 'LOAD_NODE', 'PICKUP', 'CARGO']:
+                load_nodes.append(node_id)
+                rospy.loginfo(f"🏗️ LOAD node found: {node_id} (type: {node_data.get('type')})")
+
+        if not load_nodes:
+            rospy.logwarn("⚠️ No LOAD nodes found in map_z")
+            rospy.loginfo("🔍 Available node types:")
+            node_types = {}
+            for node_id, node_data in self.navigator.nodes_data.items():
+                node_type = node_data.get('type', 'UNKNOWN')
+                if node_type not in node_types:
+                    node_types[node_type] = []
+                node_types[node_type].append(node_id)
+
+            for node_type, nodes in node_types.items():
+                rospy.loginfo(f"  - {node_type}: {nodes}")
+
+        return load_nodes
+
     def find_path_through_all_load_nodes(self, start_node_id, end_node_id, banned_edges=None):
         """
         Find shortest path that goes through all LOAD nodes.
         Uses TSP (Traveling Salesman Problem) approach.
         """
         try:
-            # Find all LOAD nodes
-            load_nodes = [node_id for node_id, node_data in self.navigator.nodes_data.items()
-                         if node_data.get('type') == 'LOAD']
+            # Find all LOAD nodes using the new function
+            load_nodes = self.find_load_nodes()
 
             rospy.loginfo(f"🏗️ Found LOAD nodes: {load_nodes}")
 
