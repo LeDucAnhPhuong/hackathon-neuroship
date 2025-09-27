@@ -94,10 +94,10 @@ class MapNavigator:
         for node in data['nodes']:
             self.nodes_data[node['id']] = node
             self.graph.add_node(node['id'], **node)
-            if node['type'] == 'start':
+            if node['type'] == 'Start':
                 self.start_node = node['id']
                 rospy.loginfo(f"🚀 Start node: {node['id']}")
-            elif node['type'] == 'end':
+            elif node['type'] == 'End':
                 self.end_node = node['id']
                 rospy.loginfo(f"🎯 End node: {node['id']}")
 
