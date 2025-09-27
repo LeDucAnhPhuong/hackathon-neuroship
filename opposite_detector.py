@@ -22,9 +22,9 @@ class SimpleOppositeDetector:
         self.opposite_tolerance = 5.0
         self.min_opposite_distance = 45.0
         self.min_distance_between_objects = 0.4  # Khoảng cách tối thiểu giữa 2 vật (m)
-        self.distance_symmetry_tolerance = 0.15  # Sai số khoảng cách đối xứng (15%)
-        self.clear_path_ratio_threshold = 0.7  # 70% vùng giữa phải trống
-        self.intersection_confidence_threshold = 0.8  # Ngưỡng confidence để coi là giao lộ
+        self.distance_symmetry_tolerance = 0.05  # Sai số khoảng cách đối xứng (5%) 15%
+        self.clear_path_ratio_threshold = 0.7  # 70% vùng giữa phải trống 
+        self.intersection_confidence_threshold = 0.9  # Ngưỡng confidence để coi là giao lộ 0.8
         
         # Biến điều khiển
         self.scanning_active = False
