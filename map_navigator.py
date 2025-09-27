@@ -187,7 +187,7 @@ class MapNavigator:
         else:
             # Sử dụng vị trí được chỉ định
             if current_path_index >= len(path) or path[current_path_index - 1] != current_node_id:
-                rospy.logerr(f"Invalid path index {current_path_index} for node {current_node_id}")
+                rospy.logerr(f"Invalid path index {current_path_index}({path[current_path_index - 1]}) for node {current_node_id}")
                 return None
             current_index = current_path_index
 
