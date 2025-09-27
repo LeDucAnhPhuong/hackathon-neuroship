@@ -21,6 +21,10 @@ class SimpleOppositeDetector:
         self.detection_interval = 2.0
         self.opposite_tolerance = 5.0
         self.min_opposite_distance = 45.0
+        self.min_distance_between_objects = 0.4  # Khoảng cách tối thiểu giữa 2 vật (m)
+        self.distance_symmetry_tolerance = 0.15  # Sai số khoảng cách đối xứng (15%)
+        self.clear_path_ratio_threshold = 0.7  # 70% vùng giữa phải trống
+        self.intersection_confidence_threshold = 0.8  # Ngưỡng confidence để coi là giao lộ
         
         # Biến điều khiển
         self.scanning_active = False
@@ -114,39 +118,64 @@ class SimpleOppositeDetector:
                 objects.append(obj)
         return objects
 
-    def find_opposite_pairs(self, objects):
+    def find_opposite_pairs(self, objects, scan):
         opposite_pairs = []
         for i, obj1 in enumerate(objects):
             for j, obj2 in enumerate(objects[i+1:], i+1):
                 angle_diff = self.get_angle_difference(obj1['center_angle'], obj2['center_angle'])
-                if angle_diff >= self.min_opposite_distance and self.are_opposite(obj1['center_angle'], obj2['center_angle']):
-                    opposite_pairs.append({'object1': obj1, 'object2': obj2, 'angle_difference': angle_diff})
+
+                # Tính khoảng cách thực tế giữa 2 vật thể bằng công thức cosine
+                distance_between = math.sqrt(
+                    obj1['distance']**2 + obj2['distance']**2 -
+                    2 * obj1['distance'] * obj2['distance'] *
+                    math.cos(math.radians(angle_diff))
+                )
+
+                # Kiểm tra các điều kiện nghiêm ngặt
+                if (angle_diff >= self.min_opposite_distance and
+                    self.are_opposite(obj1['center_angle'], obj2['center_angle']) and
+                    self.are_symmetrical_distance(obj1, obj2) and
+                    distance_between >= self.min_distance_between_objects and
+                    self.check_clear_paths_between(scan, obj1, obj2)):
+
+                    confidence = self.calculate_intersection_confidence(obj1, obj2, distance_between)
+                    opposite_pairs.append({
+                        'object1': obj1,
+                        'object2': obj2,
+                        'angle_difference': angle_diff,
+                        'distance_between': distance_between,
+                        'confidence': confidence
+                    })
         return opposite_pairs
     
     def process_detection(self):
-        if self.latest_scan is None: return
+        if self.latest_scan is None: return False
         scan = self.latest_scan
         timestamp = rospy.get_time()
         all_objects = self.find_all_objects(scan)
-        if len(all_objects) < 2: return
-        
-        opposite_pairs = self.find_opposite_pairs(all_objects)
-        
+        if len(all_objects) < 2: return False
+
+        opposite_pairs = self.find_opposite_pairs(all_objects, scan)
+
         if opposite_pairs:
-            opposite_pairs.sort(key=lambda x: abs(x['angle_difference'] - 180.0))
+            # Sắp xếp theo confidence thay vì chỉ angle difference
+            opposite_pairs.sort(key=lambda x: x['confidence'], reverse=True)
             best_pair = opposite_pairs[0]
-            # rospy.loginfo("[%.1f] *** OPPOSITE OBJECTS DETECTED ***", timestamp)
-            # Tạo và gửi tin nhắn
-            notification = {
-                "timestamp": timestamp,
-                "detection_type": 'OPPOSITE_OBJECTS',
-                # ... thông tin chi tiết khác
-            }
-#             self.notification_pub.publish(json.dumps(notification))
-            return True
-        else:
-            # rospy.loginfo("[%.1f] Found %d objects, but none are opposite", timestamp, len(all_objects))
-            return False
+
+            # Chỉ coi là giao lộ nếu confidence đủ cao
+            if best_pair['confidence'] >= self.intersection_confidence_threshold:
+                # rospy.loginfo("[%.1f] *** INTERSECTION DETECTED *** (Confidence: %.2f)", timestamp, best_pair['confidence'])
+                notification = {
+                    "timestamp": timestamp,
+                    "detection_type": 'INTERSECTION',
+                    "confidence": best_pair['confidence'],
+                    "distance_between": best_pair['distance_between']
+                }
+                # self.notification_pub.publish(json.dumps(notification))
+                return True
+
+        # rospy.loginfo("[%.1f] Found %d objects, but no valid intersection", timestamp, len(all_objects))
+        return False
 
     def detect_object_in_zone(self, zone_ranges, zone_name):
         if len(zone_ranges) == 0: return None
@@ -166,6 +195,59 @@ class SimpleOppositeDetector:
         largest_cluster = max(clusters, key=len)
         cluster_distances = [valid_ranges[i] for i in largest_cluster]
         return {'distance': np.mean(cluster_distances), 'point_count': len(largest_cluster), 'zone': zone_name}
+
+    def are_symmetrical_distance(self, obj1, obj2):
+        """Kiểm tra xem 2 vật có khoảng cách tương đương đến robot không"""
+        distance_diff = abs(obj1['distance'] - obj2['distance'])
+        avg_distance = (obj1['distance'] + obj2['distance']) / 2
+        return distance_diff / avg_distance <= self.distance_symmetry_tolerance
+
+    def check_clear_paths_between(self, scan, obj1, obj2):
+        """Kiểm tra có đường trống giữa 2 vật thể không (dấu hiệu giao lộ)"""
+        angle1, angle2 = obj1['center_angle'], obj2['center_angle']
+
+        # Đảm bảo angle1 < angle2
+        if angle1 > angle2:
+            angle1, angle2 = angle2, angle1
+
+        # Tìm góc giữa 2 vật thể
+        middle_angle = (angle1 + angle2) / 2
+        clear_count = 0
+        total_count = 0
+
+        ranges = np.array(scan.ranges)
+        for i, distance in enumerate(ranges):
+            angle = self.index_to_angle(i, scan)
+            angle_to_middle = abs(self.get_angle_difference(angle, middle_angle))
+
+            if angle_to_middle <= 15:  # Trong vùng 30° giữa 2 vật
+                total_count += 1
+                if distance > self.max_distance or not np.isfinite(distance):
+                    clear_count += 1
+
+        # Giao lộ thật = có nhiều vùng trống giữa 2 vật
+        clear_ratio = clear_count / total_count if total_count > 0 else 0
+        return clear_ratio >= self.clear_path_ratio_threshold
+
+    def calculate_intersection_confidence(self, obj1, obj2, distance_between):
+        """Tính độ tin cậy đây là giao lộ thật"""
+        # Yếu tố 1: Độ chính xác góc (gần 180° càng tốt)
+        angle_diff = self.get_angle_difference(obj1['center_angle'], obj2['center_angle'])
+        angle_accuracy = 1 - abs(angle_diff - 180) / 180
+
+        # Yếu tố 2: Tính đối xứng khoảng cách
+        distance_diff = abs(obj1['distance'] - obj2['distance'])
+        avg_distance = (obj1['distance'] + obj2['distance']) / 2
+        distance_symmetry = 1 - (distance_diff / avg_distance)
+
+        # Yếu tố 3: Khoảng cách giữa 2 vật (tối ưu khoảng 1m)
+        optimal_spacing = 1.0
+        spacing_score = 1 - abs(distance_between - optimal_spacing) / optimal_spacing
+        spacing_score = max(0, min(1, spacing_score))  # Giới hạn 0-1
+
+        # Trọng số các yếu tố
+        confidence = (angle_accuracy * 0.4 + distance_symmetry * 0.4 + spacing_score * 0.2)
+        return max(0, min(1, confidence))  # Đảm bảo trong khoảng 0-1
 
 # if __name__ == '__main__':
 #     rospy.init_node('opposite_detector_node', anonymous=True)
