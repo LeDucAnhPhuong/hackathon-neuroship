@@ -675,6 +675,10 @@ class JetBotController:
         self.robot.set_motors(left_motor, right_motor)
         
     def handle_intersection(self):
+        rospy.loginfo("\n[GIAO LỘ] Dừng lại và xử lý...")
+
+        current_direction = self.DIRECTIONS[self.current_direction_index]
+        
         rospy.loginfo("[STEP 3] Lập kế hoạch điều hướng theo bản đồ...")
         # 3. Lập kế hoạch Điều hướng
         final_decision = None
@@ -701,6 +705,7 @@ class JetBotController:
                 if intended_action != planned_action:
                     is_deviation = True
                     rospy.logwarn(f"CHỆCH HƯỚNG! Biển báo bắt buộc ({intended_action}) khác với kế hoạch ({planned_action}).")
+            
             final_decision = intended_action
             break 
 
