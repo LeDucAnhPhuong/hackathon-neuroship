@@ -125,7 +125,7 @@ class JetBotController:
         # Setup Endpoints
         self.SERVER_BASE_URL = "https://hackathon2025-dev.fpt.edu.vn/"  # URL server
         self.SUBMIT_ENDPOINT = "/api/sign-submissions/submit"
-        self.TEAM_TOKEN = "your_team_token_here"  # Token xác thực của đội
+        self.TEAM_TOKEN = "28b8940a37ed20635f0d72dd1a555520"  # Token xác thực của đội
         # End setup endpoints
 
         self.WIDTH, self.HEIGHT = 300, 300
@@ -480,6 +480,30 @@ class JetBotController:
             if debug_frame is not None:
                 self.video_writer.write(debug_frame)
 
+    def submit_sign_detection(self, text, node_id):
+        """Submit sign detection result to server"""
+        url = self.SERVER_BASE_URL + self.SUBMIT_ENDPOINT
+        payload = {
+            "text": text,
+            "node_id": node_id, 
+            "token": self.TEAM_TOKEN
+        }
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            response = requests.post(url, json=payload, headers=headers)
+            if response.status_code == 201:
+                rospy.loginfo(f"Successfully submitted: {text} at node {node_id}")
+                return True
+            else:
+                rospy.logerr(f"Submit failed: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            rospy.logerr(f"Submit error: {e}")
+            return False
+
     def cleanup(self):
         rospy.loginfo("Dừng robot và giải phóng tài nguyên...") 
         if hasattr(self, 'robot') and self.robot is not None:
@@ -629,20 +653,30 @@ class JetBotController:
         rospy.loginfo("[STEP 2] Processing data items...")
         for item in data_items:
             if item['class_name'] == 'qr_code':
-                # Code đọc QR thật
-                # box = item['box']; qr_image = self.latest_image[box[1]:box[3], box[0]:box[2]]
-                # decoded = decode(qr_image)
-                # if decoded: qr_data = decoded[0].data.decode('utf-8'); self.publish_data(...)
-                # rospy.loginfo("Found QR Code. Publishing data...")
-                # self.publish_data({'type': 'QR_CODE', 'value': 'simulated_data_123'})
-
-                response = requests.post(url, json=data)
-
-                print(response.status_code)
+                rospy.loginfo("Found QR Code. Processing...")
+                # Extract QR data from bounding box
+                box = item['box']
+                qr_image = self.latest_image[box[1]:box[3], box[0]:box[2]]
+                decoded = decode(qr_image)
+                if decoded:
+                    qr_data = decoded[0].data.decode('utf-8')
+                    rospy.loginfo(f"QR Data: {qr_data}")
+                    # Submit to server
+                    self.submit_sign_detection(qr_data, str(self.current_node_id))
+                else:
+                    rospy.logwarn("Could not decode QR code")
 
             elif item['class_name'] == 'math_problem':
-                rospy.loginfo("Found Math Problem. Solving and publishing...")
-                self.publish_data({'type': 'MATH_PROBLEM', 'value': '2+2=4'})
+                rospy.loginfo("Found Math Problem. Processing...")
+                # Extract math expression from image
+                box = item['box']
+                math_image = self.latest_image[box[1]:box[3], box[0]:box[2]]
+                # TODO: Add OCR processing for math expressions
+                # For now, use placeholder
+                math_result = "3"  # This should be replaced with actual OCR + eval
+                rospy.loginfo(f"Math result: {math_result}")
+                # Submit to server
+                self.submit_sign_detection(math_result, str(self.current_node_id))
         
         
         rospy.loginfo("[STEP 3] Lập kế hoạch điều hướng theo bản đồ...")
@@ -662,9 +696,11 @@ class JetBotController:
 
             # Ưu tiên 1: Biển báo bắt buộc
             intended_action = None
-            if 'L' in prescriptive_cmds: intended_action = 'left'
-            elif 'R' in prescriptive_cmds: intended_action = 'right'
-            elif 'F' in prescriptive_cmds: intended_action = 'straight'
+            # Map absolute direction to relative action based on current robot direction
+            for direction_label in prescriptive_cmds:
+                intended_action = self.map_absolute_to_relative(direction_label, current_direction)
+                rospy.loginfo(f"Biển báo bắt buộc: {direction_label} -> {intended_action}")
+                break  # Take first prescriptive command
             
             # Ưu tiên 2: Plan
             if intended_action is None:
@@ -676,9 +712,16 @@ class JetBotController:
                     rospy.logwarn(f"CHỆCH HƯỚNG! Biển báo bắt buộc ({intended_action}) khác với kế hoạch ({planned_action}).")
 
             # 3.3. Veto bởi biển báo cấm
-            is_prohibited = (intended_action == 'straight' and 'NF' in prohibitive_cmds) or \
-                            (intended_action == 'right' and 'NR' in prohibitive_cmds) or \
-                            (intended_action == 'left' and 'NL' in prohibitive_cmds)
+            is_prohibited = False
+            # Check if intended action is prohibited by any prohibitive sign
+            for prohibitive_label in prohibitive_cmds:
+                # Extract direction from prohibitive label (e.g., 'NN' -> 'N')
+                prohibited_direction = prohibitive_label[1:]  # Remove first 'N' 
+                prohibited_action = self.map_absolute_to_relative(prohibited_direction, current_direction)
+                if intended_action == prohibited_action:
+                    is_prohibited = True
+                    rospy.logwarn(f"Action {intended_action} is prohibited by sign {prohibitive_label}")
+                    break
 
             if is_prohibited:
                 rospy.logwarn(f"Hành động dự định '{intended_action}' bị CẤM!")
@@ -812,6 +855,29 @@ class JetBotController:
         self.turn_robot(90, update_main_direction=False)
         rospy.loginfo(f"[SCAN] Kết quả: {paths}")
         return paths
+
+    def extract_qr_data(self, detection_box, image):
+        """
+        Trích xuất dữ liệu từ QR code trong bounding box
+        """
+        try:
+            # Cắt ảnh theo bounding box
+            x1, y1, x2, y2 = detection_box
+            qr_region = image[y1:y2, x1:x2]
+            # Chuyển sang grayscale để cải thiện độ chính xác
+            gray = cv2.cvtColor(qr_region, cv2.COLOR_BGR2GRAY)
+            # Sử dụng pyzbar để decode QR
+            decoded_objects = decode(gray)
+            if decoded_objects:
+                qr_text = decoded_objects[0].data.decode('utf-8')
+                rospy.loginfo(f"✓ Đã đọc QR code: {qr_text}")
+                return qr_text
+            else:
+                rospy.logwarn("⚠ Không thể decode QR code")
+                return None
+        except Exception as e:
+            rospy.logerr(f"✗ Lỗi khi đọc QR code: {e}")
+            return None
 
 def main():
     rospy.init_node('jetbot_controller_node', anonymous=True)
