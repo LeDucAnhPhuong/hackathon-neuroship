@@ -43,7 +43,14 @@ class JetBotController:
         self.video_writer = None
         self.initialize_video_writer()
 
-        self.navigator = MapNavigator(self.MAP_FILE_PATH)
+        # Initialize map navigator with API or file
+        if self.USE_API_MAP:
+            rospy.loginfo(f"🌐 Khởi tạo MapNavigator với API (token: {self.API_TOKEN[:8]}...)")
+            self.navigator = MapNavigator.create_from_api(self.API_TOKEN, self.MAP_TYPE)
+        else:
+            rospy.loginfo(f"📁 Khởi tạo MapNavigator với file cục bộ: {self.MAP_FILE_PATH}")
+            self.navigator = MapNavigator.create_from_file(self.MAP_FILE_PATH)
+            
         self.current_node_id = self.navigator.start_node
         self.target_node_id = None
         self.planned_path = None
@@ -155,6 +162,11 @@ class JetBotController:
         self.ANGLE_TO_FACE_SIGN_MAP = {d: a for d, a in zip(self.DIRECTIONS, [45, -45, -135, 135])}
         self.MAX_CORRECTION_ADJ = 0.12
         self.MAP_FILE_PATH = "map.json"
+        # API Configuration
+        self.API_TOKEN = "28b8940a37ed20635f0d72dd1a555520"
+        self.MAP_TYPE = "map_z"
+        self.USE_API_MAP = True  # Đặt True để sử dụng API, False để dùng file cục bộ
+        
         self.LABEL_TO_DIRECTION_ENUM = {'N': Direction.NORTH, 'E': Direction.EAST, 'S': Direction.SOUTH, 'W': Direction.WEST}
         self.VIDEO_OUTPUT_FILENAME = 'jetbot_run.avi'
         self.VIDEO_FPS = 20  # Nên khớp với rospy.Rate của bạn
@@ -490,6 +502,64 @@ class JetBotController:
             self.mqtt_client.disconnect()
             
         rospy.loginfo("Đã giải phóng tài nguyên. Chương trình kết thúc.")
+
+    def submit_sign_detection(self, sign_data):
+        """
+        Gửi dữ liệu sign detection lên server API.
+        
+        Args:
+            sign_data (dict): Dữ liệu sign với format {
+                'type': 'QR_CODE' hoặc 'MATH_PROBLEM',
+                'value': 'nội dung đã decode/giải',
+                'confidence': float (optional),
+                'position': {'x': float, 'y': float} (optional)
+            }
+        """
+        try:
+            api_url = f"https://hackathon2025-dev.fpt.edu.vn/api/signs/submit/?token={self.API_TOKEN}"
+            
+            # Chuẩn bị payload
+            payload = {
+                'node_id': self.current_node_id,
+                'timestamp': rospy.get_time(),
+                'sign_type': sign_data.get('type'),
+                'sign_value': sign_data.get('value'),
+                'confidence': sign_data.get('confidence', 1.0),
+                'robot_position': sign_data.get('position', {'x': 0, 'y': 0})
+            }
+            
+            rospy.loginfo(f"🚀 Gửi sign detection lên API: {payload}")
+            
+            response = requests.post(api_url, json=payload, timeout=5)
+            
+            if response.status_code == 200:
+                result = response.json()
+                rospy.loginfo(f"✅ Submit thành công! Server response: {result}")
+                return True
+            else:
+                rospy.logwarn(f"⚠️ Submit failed với status {response.status_code}: {response.text}")
+                return False
+                
+        except requests.RequestException as e:
+            rospy.logerr(f"❌ Lỗi network khi submit sign: {e}")
+            return False
+        except Exception as e:
+            rospy.logerr(f"❌ Lỗi không xác định khi submit sign: {e}")
+            return False
+
+    def publish_data(self, data):
+        """Legacy method - giữ lại để tương thích ngược và thêm API submission"""
+        try:
+            # Publish qua MQTT như cũ
+            data_json = json.dumps(data)
+            self.mqtt_client.publish(self.MQTT_DATA_TOPIC, data_json)
+            rospy.loginfo(f"Published to MQTT: {data}")
+            
+            # Đồng thời submit lên API
+            self.submit_sign_detection(data)
+            
+        except Exception as e:
+            rospy.logerr(f"Lỗi khi publish data: {e}")
 
     def map_absolute_to_relative(self, target_direction_label, current_robot_direction):
         """
