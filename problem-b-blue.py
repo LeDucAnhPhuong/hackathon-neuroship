@@ -55,6 +55,7 @@ class JetBotController:
         self.target_node_id = None
         self.planned_path = None
         self.banned_edges = []
+        self.skip_first_detection = True  # Flag để bỏ qua detection đầu tiên ở startNode
         self.plan_initial_route()
 
         self.latest_scan = None
@@ -815,7 +816,7 @@ class JetBotController:
         try:
             # Find all LOAD nodes
             load_nodes = [node_id for node_id, node_data in self.navigator.nodes_data.items()
-                         if node_data.get('type') == 'LOAD']
+                         if node_data.get('type') == 'Load']
 
             rospy.loginfo(f"🏗️ Found LOAD nodes: {load_nodes}")
 
