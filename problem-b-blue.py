@@ -1231,7 +1231,7 @@ class JetBotController:
         next_node_id = None
         if not is_deviation:
             # Nếu đi theo kế hoạch, chỉ cần lấy node tiếp theo từ path
-            next_node_id = self.planned_path[self.current_direction_index + 1] if self.current_direction_index else self.planned_path[self.planned_path.index(self.current_node_id) + 1]
+            next_node_id = self.planned_path[self.planned_path.index(self.current_node_id) + 1]
         else:
             # Nếu chệch hướng, phải tìm node tiếp theo dựa trên hành động đã thực hiện
             new_robot_direction = self.DIRECTIONS[self.current_direction_index]
