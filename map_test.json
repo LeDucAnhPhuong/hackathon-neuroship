@@ -1,0 +1,39 @@
+{
+  "nodes": [
+    {"id": 1, "x": 0, "y": 0, "type": "start"},
+    {"id": 2, "x": 1, "y": 0, "type": "normal"},
+    {"id": 3, "x": 2, "y": 0, "type": "normal"},
+    {"id": 4, "x": 0, "y": 1, "type": "normal"},
+    {"id": 5, "x": 1, "y": 1, "type": "normal"},
+    {"id": 6, "x": 2, "y": 1, "type": "normal"},
+    {"id": 7, "x": 0, "y": 2, "type": "normal"},
+    {"id": 8, "x": 1, "y": 2, "type": "normal"},
+    {"id": 9, "x": 2, "y": 2, "type": "end"}
+  ],
+  "edges": [
+    {"source": 1, "target": 2, "label": "E"},
+    {"source": 2, "target": 1, "label": "W"},
+    {"source": 2, "target": 3, "label": "E"},
+    {"source": 3, "target": 2, "label": "W"},
+    {"source": 1, "target": 4, "label": "S"},
+    {"source": 4, "target": 1, "label": "N"},
+    {"source": 2, "target": 5, "label": "S"},
+    {"source": 5, "target": 2, "label": "N"},
+    {"source": 3, "target": 6, "label": "S"},
+    {"source": 6, "target": 3, "label": "N"},
+    {"source": 4, "target": 5, "label": "E"},
+    {"source": 5, "target": 4, "label": "W"},
+    {"source": 5, "target": 6, "label": "E"},
+    {"source": 6, "target": 5, "label": "W"},
+    {"source": 4, "target": 7, "label": "S"},
+    {"source": 7, "target": 4, "label": "N"},
+    {"source": 5, "target": 8, "label": "S"},
+    {"source": 8, "target": 5, "label": "N"},
+    {"source": 6, "target": 9, "label": "S"},
+    {"source": 9, "target": 6, "label": "N"},
+    {"source": 7, "target": 8, "label": "E"},
+    {"source": 8, "target": 7, "label": "W"},
+    {"source": 8, "target": 9, "label": "E"},
+    {"source": 9, "target": 8, "label": "W"}
+  ]
+}
