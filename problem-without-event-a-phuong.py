@@ -382,7 +382,7 @@ class JetBotController:
                     # Bỏ qua detection đầu tiên nếu đang ở startNode để tránh false positive
                     if self.skip_first_detection:
                         rospy.loginfo("SỰ KIỆN (LiDAR): Bỏ qua detection đầu tiên ở startNode.")
-                        time.sleep(1)
+                        time.sleep(0.7)
                         self.skip_first_detection = False  # Chỉ bỏ qua một lần
                         continue
 
