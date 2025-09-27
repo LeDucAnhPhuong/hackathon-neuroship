@@ -682,7 +682,7 @@ class JetBotController:
         # Check if current node is a LOAD node (Problem B requirement)
         current_node_type = self.get_current_node_type()
         if current_node_type == "LOAD":
-            rospy.loginfo(f"🔄 [PROBLEM B] Detected LOAD node {self.current_node_id}! Executing East-South turn (135° right)...")
+            rospy.loginfo(f"🔄 [PROBLEM B] Detected LOAD node {self.current_node_id}! Executing 35° right turn...")
             self.handle_load_node()
             return
 
@@ -760,7 +760,7 @@ class JetBotController:
     def handle_load_node(self):
         """
         Handle special behavior when robot reaches a LOAD node (Problem B).
-        Performs East-South turn (135° right), detects image, and submits information to server.
+        Performs 35° right turn, detects image, then turns back -35°.
         """
         try:
             # Submit LOAD node information to API
@@ -776,20 +776,20 @@ class JetBotController:
             rospy.loginfo(f"📤 [PROBLEM B] Submitting LOAD node data: {load_data}")
             self.submit_sign_detection(load_data)
 
-            # Perform East-South turn (135° right turn)
-            rospy.loginfo("🔄 [PROBLEM B] Executing East-South turn (135° right)...")
-            self.turn_robot(135, True)
+            # Perform 35° right turn
+            rospy.loginfo("🔄 [PROBLEM B] Executing 35° right turn...")
+            self.turn_robot(35, False)  # Don't update main direction
 
-            # Detect image after turning 135 degrees
+            # Detect image after turning 35 degrees
             detection_result = self.detect_image_after_turn()
             rospy.loginfo(f"🔍 [PROBLEM B] Image detection result: {detection_result}")
 
             # Submit detection result to API
             self.submit_detection_result(detection_result)
 
-            # Turn back (opposite direction)
-            rospy.loginfo("🔄 [PROBLEM B] Turning back after detection...")
-            self.turn_robot(-135, True)
+            # Turn back -35° to original orientation
+            rospy.loginfo("🔄 [PROBLEM B] Turning back -35° to original orientation...")
+            self.turn_robot(-35, False)  # Don't update main direction
 
             # After turning, continue with normal intersection logic
             rospy.loginfo("✅ [PROBLEM B] LOAD node handling completed. Continuing with navigation...")
@@ -903,11 +903,11 @@ class JetBotController:
 
     def detect_image_after_turn(self):
         """
-        Detect image after turning 135 degrees.
+        Detect image after turning 35 degrees.
         Currently returns default 'rectangle' string as AI model is not available.
         """
         try:
-            rospy.loginfo("🔍 [PROBLEM B] Detecting image after 135° turn...")
+            rospy.loginfo("🔍 [PROBLEM B] Detecting image after 35° turn...")
 
             # Wait a moment for image to stabilize
             rospy.sleep(1.0)
@@ -935,7 +935,7 @@ class JetBotController:
                 'position': {'x': 0, 'y': 0},
                 'node_id': self.current_node_id,
                 'timestamp': rospy.get_time(),
-                'detection_method': '135_degree_turn'
+                'detection_method': '35_degree_turn'
             }
 
             rospy.loginfo(f"📤 [PROBLEM B] Submitting detection result to API: {detection_data}")
@@ -957,7 +957,7 @@ class JetBotController:
         Modified to handle the turn back functionality.
         """
         try:
-            # Since we turned 135° and then turned back -135°, robot should be in original orientation
+            # Since we turned 35° and then turned back -35°, robot should be in original orientation
             # No need to update direction index as we're back to original direction
             rospy.loginfo(f"🧭 [PROBLEM B] Robot direction maintained after turn back: {self.DIRECTIONS[self.current_direction_index].name}")
 

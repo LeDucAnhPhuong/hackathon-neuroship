@@ -74,6 +74,13 @@ class ProblemAController(BaseJetBotController):
                     self.current_node_id = self.target_node_id
                     rospy.loginfo(f"Arrived at node {self.current_node_id}")
 
+                    # Check if this is a LOAD node
+                    current_node_type = self.get_current_node_type()
+                    if current_node_type == "LOAD":
+                        rospy.loginfo(f"🔄 Detected LOAD node {self.current_node_id}! Handling LOAD node...")
+                        self.handle_load_node()
+                        continue
+
                     if self.current_node_id == self.navigator.end_node:
                         rospy.loginfo("GOAL REACHED! Problem A completed!")
                         self._set_state(RobotState.GOAL_REACHED)
@@ -193,6 +200,40 @@ class ProblemAController(BaseJetBotController):
         rospy.loginfo(f"Next target: node {self.target_node_id}")
         
         self._set_state(RobotState.LEAVING_INTERSECTION)
+
+    def handle_load_node(self):
+        """
+        Handle special behavior when robot reaches a LOAD node.
+        Performs 35° right turn, then -35° turn back.
+        """
+        try:
+            rospy.loginfo(f"📍 [LOAD NODE] Processing LOAD node {self.current_node_id}...")
+
+            # Perform 35° right turn
+            rospy.loginfo("🔄 [LOAD NODE] Executing 35° right turn...")
+            self.turn_robot(35, False)  # Don't update main direction
+
+            # Brief pause for detection/processing
+            rospy.sleep(0.5)
+
+            # Turn back -35° to original orientation
+            rospy.loginfo("🔄 [LOAD NODE] Turning back -35° to original orientation...")
+            self.turn_robot(-35, False)  # Don't update main direction
+
+            rospy.loginfo("✅ [LOAD NODE] LOAD node handling completed. Continuing with navigation...")
+
+            # Check if we've reached the final destination
+            if self.current_node_id == self.navigator.end_node:
+                rospy.loginfo("GOAL REACHED! Problem A completed!")
+                self._set_state(RobotState.GOAL_REACHED)
+            else:
+                # Continue with normal intersection logic
+                self._set_state(RobotState.HANDLING_EVENT)
+                self.handle_intersection()
+
+        except Exception as e:
+            rospy.logerr(f"❌ Error handling LOAD node: {e}")
+            self._set_state(RobotState.DEAD_END)
 
     def map_absolute_to_relative(self, target_direction_label, current_robot_direction):
         """Convert absolute direction to relative action"""

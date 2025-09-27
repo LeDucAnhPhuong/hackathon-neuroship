@@ -147,13 +147,28 @@ class MapNavigator:
 
         try:
             path = nx.astar_path(
-                graph_to_search, 
-                start_node_id, 
-                end_node_id, 
+                graph_to_search,
+                start_node_id,
+                end_node_id,
                 heuristic=self._heuristic
             )
-            rospy.loginfo(f"Path found: {path}")
-            return path
+
+            # Validate path to ensure no 180-degree turns are required
+            validated_path = self._validate_path_no_uturn(path, graph_to_search)
+            if validated_path:
+                rospy.loginfo(f"Path found: {validated_path}")
+                return validated_path
+            else:
+                rospy.logwarn("Path requires 180-degree turns, trying alternative...")
+                # Try to find alternative path by temporarily banning problematic edges
+                alternative_path = self._find_alternative_path(start_node_id, end_node_id, path, graph_to_search)
+                if alternative_path:
+                    rospy.loginfo(f"Alternative path found: {alternative_path}")
+                    return alternative_path
+                else:
+                    rospy.logwarn("No alternative path found, returning original path")
+                    return path
+
         except nx.NetworkXNoPath:
             return None
 
@@ -216,3 +231,87 @@ class MapNavigator:
             MapNavigator: Instance mới đã load map từ file
         """
         return MapNavigator(map_file_path=map_file_path)
+
+    def _validate_path_no_uturn(self, path, graph):
+        """
+        Validate that a path doesn't require any 180-degree turns.
+        Returns the path if valid, None if it contains 180-degree turns.
+        """
+        if len(path) < 3:
+            return path  # No U-turns possible with less than 3 nodes
+
+        for i in range(len(path) - 2):
+            current_node = path[i]
+            next_node = path[i + 1]
+            following_node = path[i + 2]
+
+            # Get direction from current to next
+            edge_data_1 = graph.get_edge_data(current_node, next_node)
+            direction_1 = edge_data_1.get('label') if edge_data_1 else None
+
+            # Get direction from next to following
+            edge_data_2 = graph.get_edge_data(next_node, following_node)
+            direction_2 = edge_data_2.get('label') if edge_data_2 else None
+
+            # Check if this requires a 180-degree turn
+            if self._is_opposite_direction(direction_1, direction_2):
+                rospy.logwarn(f"180-degree turn detected: {current_node} -> {next_node} -> {following_node} "
+                              f"({direction_1} -> {direction_2})")
+                return None
+
+        return path
+
+    def _is_opposite_direction(self, dir1, dir2):
+        """Check if two directions are opposite (require 180-degree turn)"""
+        if not dir1 or not dir2:
+            return False
+
+        opposite_pairs = [
+            ('N', 'S'), ('S', 'N'),
+            ('E', 'W'), ('W', 'E')
+        ]
+        return (dir1, dir2) in opposite_pairs
+
+    def _find_alternative_path(self, start_node_id, end_node_id, problematic_path, graph):
+        """
+        Find an alternative path that avoids 180-degree turns by temporarily banning problematic edges.
+        """
+        banned_edges = []
+
+        # Identify problematic edges that cause 180-degree turns
+        for i in range(len(problematic_path) - 2):
+            current_node = problematic_path[i]
+            next_node = problematic_path[i + 1]
+            following_node = problematic_path[i + 2]
+
+            edge_data_1 = graph.get_edge_data(current_node, next_node)
+            direction_1 = edge_data_1.get('label') if edge_data_1 else None
+
+            edge_data_2 = graph.get_edge_data(next_node, following_node)
+            direction_2 = edge_data_2.get('label') if edge_data_2 else None
+
+            if self._is_opposite_direction(direction_1, direction_2):
+                # Ban one of the problematic edges
+                banned_edges.append((next_node, following_node))
+
+        if not banned_edges:
+            return None
+
+        # Create new graph without problematic edges
+        alt_graph = graph.copy()
+        alt_graph.remove_edges_from(banned_edges)
+
+        try:
+            alternative_path = nx.astar_path(
+                alt_graph,
+                start_node_id,
+                end_node_id,
+                heuristic=self._heuristic
+            )
+
+            # Validate the alternative path
+            validated_alt_path = self._validate_path_no_uturn(alternative_path, alt_graph)
+            return validated_alt_path
+
+        except nx.NetworkXNoPath:
+            return None

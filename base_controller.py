@@ -550,6 +550,20 @@ class BaseJetBotController:
         """Log navigation decision"""
         self.changelog.log_navigation_event(action, details, data)
 
+    def get_current_node_type(self):
+        """
+        Get the type of the current node from map data.
+        Returns the node type (e.g., 'NORMAL', 'LOAD', 'START', 'END') or None if not found.
+        """
+        try:
+            node_data = self.navigator.nodes_data.get(self.current_node_id)
+            if node_data:
+                return node_data.get('type')
+            return None
+        except Exception as e:
+            rospy.logerr(f"Error getting current node type: {e}")
+            return None
+
     def plan_initial_route(self):
         """Plan initial route - CÓ THỂ override trong subclass"""
         rospy.loginfo(f"📍 Planning route from {self.navigator.start_node} to {self.navigator.end_node}...")
