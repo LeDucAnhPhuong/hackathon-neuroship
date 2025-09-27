@@ -413,11 +413,11 @@ class JetBotController:
                 # Nếu LiDAR im lặng, kiểm tra xem vạch kẻ có sắp biến mất ở phía xa không.
                 lookahead_line_center = self._get_line_center(self.latest_image, self.LOOKAHEAD_ROI_Y, self.LOOKAHEAD_ROI_H)
 
-                if lookahead_line_center is None:
-                    rospy.logwarn("SỰ KIỆN (Dự báo): Vạch kẻ đường biến mất ở phía xa. Chuẩn bị vào giao lộ.")
-                    # Hành động phòng ngừa: chuyển sang trạng thái đi thẳng vào giao lộ.
-                    self._set_state(RobotState.APPROACHING_INTERSECTION)
-                    continue # Bắt đầu vòng lặp mới với trạng thái mới
+                # if lookahead_line_center is None:
+                #     rospy.logwarn("SỰ KIỆN (Dự báo): Vạch kẻ đường biến mất ở phía xa. Chuẩn bị vào giao lộ.")
+                #     # Hành động phòng ngừa: chuyển sang trạng thái đi thẳng vào giao lộ.
+                #     self._set_state(RobotState.APPROACHING_INTERSECTION)
+                #     continue # Bắt đầu vòng lặp mới với trạng thái mới
 
                 # --- BƯỚC 3: BÁM LINE BÌNH THƯỜNG (NẾU PHÍA TRƯỚC AN TOÀN) ---
                 # Chỉ khi cả LiDAR và ROI Dự báo đều ổn, ta mới thực hiện bám line.
