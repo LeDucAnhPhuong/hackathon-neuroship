@@ -79,12 +79,21 @@ class JetBotController:
         )
 
         if self.planned_path and len(self.planned_path) > 1:
-            # Kiểm tra và tránh quay 180 độ trong đường đi
-            self.planned_path = self._avoid_180_degree_turns(self.planned_path)
+            rospy.loginfo(f"Đường đi ban đầu: {self.planned_path}")
 
-            if self.planned_path and len(self.planned_path) > 1:
+            # Kiểm tra và tránh quay 180 độ trong đường đi
+            optimized_path = self._avoid_180_degree_turns(self.planned_path)
+
+            if optimized_path and len(optimized_path) > 1:
+                self.planned_path = optimized_path
                 self.target_node_id = self.planned_path[1]
                 rospy.loginfo(f"Đã tìm thấy đường đi (tránh quay 180°): {self.planned_path}. Đích đến đầu tiên: {self.target_node_id}")
+
+                # Kiểm tra cụ thể cho trường hợp như 9→8→7
+                if len(self.planned_path) >= 3:
+                    for i in range(len(self.planned_path) - 2):
+                        if self.planned_path[i] == self.planned_path[i + 2]:
+                            rospy.logwarn(f"CẢNH BÁO: Vẫn còn pattern quay 180° trong đường đi tại {self.planned_path[i:i+3]}")
             else:
                 rospy.logerr("Không tìm thấy đường đi hợp lệ sau khi tránh quay 180°!")
                 self._set_state(RobotState.DEAD_END)
@@ -95,6 +104,7 @@ class JetBotController:
     def _avoid_180_degree_turns(self, path, recursion_depth=0):
         """
         Kiểm tra và tránh việc quay 180 độ trong đường đi bằng cách tìm đường thay thế.
+        Đặc biệt xử lý trường hợp đi thẳng rồi quay ngược lại (ví dụ: 9→8→7).
 
         Args:
             path: Danh sách các node trong đường đi
@@ -111,36 +121,49 @@ class JetBotController:
             rospy.logwarn("Đã đạt giới hạn đệ quy khi tránh quay 180°, sử dụng đường hiện tại")
             return path
 
-        rospy.loginfo(f"Đang kiểm tra và tránh quay 180 độ trong đường đi (độ sâu: {recursion_depth})...")
+        rospy.loginfo(f"Đang kiểm tra đường đi {path} để tránh quay 180° (độ sâu: {recursion_depth})...")
 
         for i in range(len(path) - 2):
             current_node = path[i]
             next_node = path[i + 1]
             following_node = path[i + 2]
 
-            # Kiểm tra xem navigator có các phương thức cần thiết không
-            if not hasattr(self.navigator, 'get_direction_between_nodes'):
-                rospy.logwarn("Navigator không hỗ trợ get_direction_between_nodes, bỏ qua kiểm tra 180°")
-                return path
+            rospy.loginfo(f"Kiểm tra chuỗi: {current_node} → {next_node} → {following_node}")
 
-            # Lấy hướng từ current đến next
-            direction_to_next = self.navigator.get_direction_between_nodes(current_node, next_node)
-            # Lấy hướng từ next đến following
-            direction_to_following = self.navigator.get_direction_between_nodes(next_node, following_node)
+            # Kiểm tra điều kiện đơn giản: nếu đi từ A→B→A (quay ngược trực tiếp)
+            if current_node == following_node:
+                rospy.logwarn(f"Phát hiện quay 180° trực tiếp tại node {next_node}: {current_node}→{next_node}→{following_node}")
 
-            if direction_to_next and direction_to_following:
-                # Kiểm tra xem có phải quay 180 độ không
-                if self._is_180_degree_turn(direction_to_next, direction_to_following):
-                    rospy.logwarn(f"Phát hiện quay 180° tại node {next_node}: {direction_to_next} -> {direction_to_following}")
+                # Tìm đường thay thế tránh node trung gian
+                alternative_path = self._find_alternative_path(path, i, next_node)
 
-                    # Tìm đường thay thế tránh node này
-                    alternative_path = self._find_alternative_path(path, i, next_node)
+                if alternative_path:
+                    rospy.loginfo(f"Đã tìm thấy đường thay thế tránh quay 180°: {alternative_path}")
+                    return self._avoid_180_degree_turns(alternative_path, recursion_depth + 1)
+                else:
+                    rospy.logwarn(f"Không tìm thấy đường thay thế cho quay 180° tại node {next_node}")
+                    continue
 
-                    if alternative_path:
-                        rospy.loginfo(f"Đã tìm thấy đường thay thế tránh quay 180°: {alternative_path}")
-                        return self._avoid_180_degree_turns(alternative_path, recursion_depth + 1)  # Kiểm tra đệ quy
-                    else:
-                        rospy.logwarn(f"Không tìm thấy đường thay thế cho quay 180° tại node {next_node}")
+            # Kiểm tra qua hướng di chuyển (nếu navigator hỗ trợ)
+            if hasattr(self.navigator, 'get_direction_between_nodes'):
+                # Lấy hướng từ current đến next
+                direction_to_next = self.navigator.get_direction_between_nodes(current_node, next_node)
+                # Lấy hướng từ next đến following
+                direction_to_following = self.navigator.get_direction_between_nodes(next_node, following_node)
+
+                if direction_to_next and direction_to_following:
+                    # Kiểm tra xem có phải quay 180 độ không
+                    if self._is_180_degree_turn(direction_to_next, direction_to_following):
+                        rospy.logwarn(f"Phát hiện quay 180° qua hướng tại node {next_node}: {direction_to_next} → {direction_to_following}")
+
+                        # Tìm đường thay thế tránh node này
+                        alternative_path = self._find_alternative_path(path, i, next_node)
+
+                        if alternative_path:
+                            rospy.loginfo(f"Đã tìm thấy đường thay thế tránh quay 180°: {alternative_path}")
+                            return self._avoid_180_degree_turns(alternative_path, recursion_depth + 1)
+                        else:
+                            rospy.logwarn(f"Không tìm thấy đường thay thế cho quay 180° tại node {next_node}")
 
         return path
 
@@ -165,51 +188,65 @@ class JetBotController:
     def _find_alternative_path(self, original_path, problem_index, problem_node):
         """
         Tìm đường thay thế tránh node gây quay 180 độ.
+        Ưu tiên tìm đường ngắn hơn và trực tiếp hơn.
 
         Args:
-            original_path: Đường đi gốc
-            problem_index: Chỉ số của node trước node có vấn đề
-            problem_node: Node gây ra quay 180 độ
+            original_path: Đường đi gốc (ví dụ: [9, 8, 7])
+            problem_index: Chỉ số của node trước node có vấn đề (ví dụ: 0 cho node 9)
+            problem_node: Node gây ra quay 180 độ (ví dụ: node 8)
 
         Returns:
             Đường đi thay thế hoặc None nếu không tìm được
         """
         try:
-            # Thêm node có vấn đề vào danh sách cấm tạm thời
+            start_node = original_path[problem_index]  # Node bắt đầu (ví dụ: 9)
+            target_node = original_path[problem_index + 2]  # Node đích (ví dụ: 7)
+
+            rospy.loginfo(f"Tìm đường thay thế từ {start_node} đến {target_node}, tránh {problem_node}")
+
+            # Phương pháp 1: Tìm đường trực tiếp từ start đến target, tránh problem_node
             temp_banned_edges = self.banned_edges.copy()
 
-            # Cấm tất cả các cạnh liên kết với node có vấn đề (nếu navigator hỗ trợ)
+            # Cấm tất cả các cạnh liên kết với node có vấn đề
             if hasattr(self.navigator, 'get_all_neighbors'):
                 neighbors = self.navigator.get_all_neighbors(problem_node)
                 for neighbor in neighbors:
                     temp_banned_edges.append((neighbor, problem_node))
                     temp_banned_edges.append((problem_node, neighbor))
             else:
-                # Fallback: chỉ cấm cạnh trực tiếp trong đường đi gốc
-                if problem_index > 0:
-                    prev_node = original_path[problem_index]
-                    temp_banned_edges.append((prev_node, problem_node))
-                    temp_banned_edges.append((problem_node, prev_node))
+                # Fallback: cấm cạnh trong đường đi gốc
+                temp_banned_edges.append((start_node, problem_node))
+                temp_banned_edges.append((problem_node, start_node))
+                temp_banned_edges.append((problem_node, target_node))
+                temp_banned_edges.append((target_node, problem_node))
 
-                if problem_index + 2 < len(original_path):
-                    next_node = original_path[problem_index + 2]
-                    temp_banned_edges.append((problem_node, next_node))
-                    temp_banned_edges.append((next_node, problem_node))
+            # Tìm đường trực tiếp từ start đến target
+            direct_path = self.navigator.find_path(start_node, target_node, temp_banned_edges)
 
-            # Tìm đường mới từ node trước vấn đề đến đích
-            start_node = original_path[problem_index]
+            if direct_path and len(direct_path) >= 2:
+                # Kết hợp với phần còn lại của đường gốc
+                remaining_path = original_path[problem_index + 2:]
+                if len(remaining_path) > 1:
+                    # Có thêm các node sau target
+                    new_path = original_path[:problem_index] + direct_path + remaining_path[1:]
+                else:
+                    # Target là node cuối
+                    new_path = original_path[:problem_index] + direct_path
+
+                rospy.loginfo(f"Tìm thấy đường trực tiếp: {direct_path}")
+                rospy.loginfo(f"Đường mới hoàn chỉnh: {new_path}")
+                return new_path
+
+            # Phương pháp 2: Nếu không có đường trực tiếp, tìm đường đến đích cuối cùng
             end_node = self.navigator.end_node
-
             alternative_segment = self.navigator.find_path(start_node, end_node, temp_banned_edges)
 
             if alternative_segment and len(alternative_segment) > 1:
                 # Kết hợp phần đầu của đường cũ với đường thay thế mới
-                new_path = original_path[:problem_index + 1] + alternative_segment[1:]
+                new_path = original_path[:problem_index] + alternative_segment
 
-                # Kiểm tra đường mới có hợp lệ không
-                if len(new_path) >= len(original_path):
-                    rospy.loginfo(f"Đường thay thế dài hơn đường gốc ({len(new_path)} vs {len(original_path)})")
-
+                rospy.loginfo(f"Tìm thấy đường thay thế đến đích cuối: {alternative_segment}")
+                rospy.loginfo(f"Đường mới hoàn chỉnh: {new_path}")
                 return new_path
 
         except Exception as e:
