@@ -79,7 +79,6 @@ class JetBotController:
         )
         if self.planned_path and len(self.planned_path) > 1:
             self.target_node_id = self.planned_path[1]
-            self.current_path_index = 0  # Reset path index
             rospy.loginfo(f"Đã tìm thấy đường đi qua LOAD nodes: {self.planned_path}. Đích đến đầu tiên: {self.target_node_id}")
         else:
             rospy.logerr("Không tìm thấy đường đi hoặc đường đi quá ngắn!")
@@ -138,7 +137,7 @@ class JetBotController:
         self.ROI_Y = int(self.HEIGHT * 0.85)
         self.ROI_H = int(self.HEIGHT * 0.15)
         self.ROI_CENTER_WIDTH_PERCENT = 0.5
-        self.LOOKAHEAD_ROI_Y = int(self.HEIGHT * 0.60) # Vị trí Y cao hơn
+        self.LOOKAHEAD_ROI_Y = int(self.HEIGHT * 0.50) # Vị trí Y cao hơn
         self.LOOKAHEAD_ROI_H = int(self.HEIGHT * 0.15) # Chiều cao tương tự
 
         self.CORRECTION_GAIN = 0.5
@@ -1152,7 +1151,7 @@ class JetBotController:
         is_deviation = False
 
         while True:
-            planned_direction_label = self.navigator.get_next_direction_label(self.current_node_id, self.planned_path, self.current_path_index)
+            planned_direction_label = self.navigator.get_next_direction_label(self.current_node_id, self.planned_path)
             if not planned_direction_label:
                 rospy.logerr("Lỗi kế hoạch: Không tìm thấy bước tiếp theo.")
                 self._set_state(RobotState.DEAD_END)
