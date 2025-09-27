@@ -50,11 +50,12 @@ class JetBotController:
         else:
             rospy.loginfo(f"📁 Khởi tạo MapNavigator với file cục bộ: {self.MAP_FILE_PATH}")
             self.navigator = MapNavigator.create_from_file(self.MAP_FILE_PATH)
-            
+
         self.current_node_id = self.navigator.start_node
         self.target_node_id = None
         self.planned_path = None
         self.banned_edges = []
+        self.skip_first_detection = True  # Flag để bỏ qua detection đầu tiên ở startNode
         self.plan_initial_route()
 
         self.latest_scan = None
@@ -378,6 +379,12 @@ class JetBotController:
                 # --- BƯỚC 1: KIỂM TRA TÍN HIỆU ƯU TIÊN CAO (LiDAR) ---
                 # Đây là tín hiệu đáng tin cậy nhất, nếu nó kích hoạt, xử lý ngay.
                 if self.detector.process_detection():
+                    # Bỏ qua detection đầu tiên nếu đang ở startNode để tránh false positive
+                    if self.skip_first_detection:
+                        rospy.loginfo("SỰ KIỆN (LiDAR): Bỏ qua detection đầu tiên ở startNode.")
+                        self.skip_first_detection = False  # Chỉ bỏ qua một lần
+                        continue
+
                     rospy.loginfo("SỰ KIỆN (LiDAR): Phát hiện giao lộ. Dừng ngay lập tức.")
                     self.robot.stop()
                     time.sleep(0.5) # Chờ robot dừng hẳn
