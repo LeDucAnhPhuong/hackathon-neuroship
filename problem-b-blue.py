@@ -380,7 +380,7 @@ class JetBotController:
                 if self.detector.process_detection():
                     if self.skip_first_detection:
                         rospy.loginfo("SỰ KIỆN (LiDAR): Bỏ qua detection đầu tiên ở startNode.")
-                        time.sleep(0.5)
+                        time.sleep(1)
                         self.skip_first_detection = False  # Chỉ bỏ qua một lần
                         continue
                     rospy.loginfo("SỰ KIỆN (LiDAR): Phát hiện giao lộ. Dừng ngay lập tức.")
