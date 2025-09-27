@@ -1197,6 +1197,9 @@ class JetBotController:
         elif final_decision == 'left':
             rospy.loginfo("[FINAL] Decision: Turn LEFT.")
             self.turn_robot(-90, True)
+        elif final_decision == 'turn_around':
+            rospy.loginfo("[FINAL] Decision: TURN AROUND.")
+            self.turn_robot(180, True)
         else:
             rospy.logwarn("[!!!] DEAD END! No valid paths found.")
             self._set_state(RobotState.DEAD_END)
