@@ -1151,7 +1151,7 @@ class JetBotController:
         is_deviation = False
 
         while True:
-            planned_direction_label = self.navigator.get_next_direction_label(self.current_node_id, self.planned_path)
+            planned_direction_label = self.navigator.get_next_direction_label(self.current_node_id, self.planned_path, self.current_path_index)
             if not planned_direction_label:
                 rospy.logerr("Lỗi kế hoạch: Không tìm thấy bước tiếp theo.")
                 self._set_state(RobotState.DEAD_END)
