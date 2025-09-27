@@ -413,11 +413,11 @@ class JetBotController:
                 # Nếu LiDAR im lặng, kiểm tra xem vạch kẻ có sắp biến mất ở phía xa không.
                 lookahead_line_center = self._get_line_center(self.latest_image, self.LOOKAHEAD_ROI_Y, self.LOOKAHEAD_ROI_H)
 
-                # if lookahead_line_center is None:
-                #     rospy.logwarn("SỰ KIỆN (Dự báo): Vạch kẻ đường biến mất ở phía xa. Chuẩn bị vào giao lộ.")
-                #     # Hành động phòng ngừa: chuyển sang trạng thái đi thẳng vào giao lộ.
-                #     self._set_state(RobotState.APPROACHING_INTERSECTION)
-                #     continue # Bắt đầu vòng lặp mới với trạng thái mới
+                if lookahead_line_center is None:
+                    rospy.logwarn("SỰ KIỆN (Dự báo): Vạch kẻ đường biến mất ở phía xa. Chuẩn bị vào giao lộ.")
+                    # Hành động phòng ngừa: chuyển sang trạng thái đi thẳng vào giao lộ.
+                    self._set_state(RobotState.APPROACHING_INTERSECTION)
+                    continue # Bắt đầu vòng lặp mới với trạng thái mới
 
                 # --- BƯỚC 3: BÁM LINE BÌNH THƯỜNG (NẾU PHÍA TRƯỚC AN TOÀN) ---
                 # Chỉ khi cả LiDAR và ROI Dự báo đều ổn, ta mới thực hiện bám line.
@@ -426,10 +426,10 @@ class JetBotController:
                 if execution_line_center is not None:
                     # An toàn để bám line, vì chúng ta biết phía trước không có giao lộ đột ngột.
                     self.correct_course(execution_line_center)
-                # else:
-                #     # Trường hợp hiếm: ROI xa thấy line nhưng ROI gần lại không. Dừng lại cho an toàn.
-                #     rospy.logwarn("Trạng thái không nhất quán: ROI xa thấy line, ROI gần không thấy. Tạm dừng an toàn.")
-                #     self.robot.stop()
+                else:
+                    # Trường hợp hiếm: ROI xa thấy line nhưng ROI gần lại không. Dừng lại cho an toàn.
+                    rospy.logwarn("Trạng thái không nhất quán: ROI xa thấy line, ROI gần không thấy. Tạm dừng an toàn.")
+                    self.robot.stop()
 
             # ===================================================================
             # TRẠNG THÁI 2: ĐANG TIẾN VÀO GIAO LỘ (APPROACHING_INTERSECTION)
