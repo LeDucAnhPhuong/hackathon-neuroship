@@ -147,7 +147,7 @@ class JetBotController:
         self.INTERSECTION_APPROACH_DURATION = 0.5
 
         self.LINE_REACQUIRE_TIMEOUT = 3.0
-        self.SCAN_PIXEL_THRESHOLD = 150
+        self.SCAN_PIXEL_THRESHOLD = 50
         self.YOLO_MODEL_PATH = "models/best.onnx"
         self.YOLO_CONF_THRESHOLD = 0.6
         self.YOLO_INPUT_SIZE = (640, 640)
