@@ -702,7 +702,7 @@ class JetBotController:
 
         # Check if current node is a LOAD node (Problem B requirement)
         current_node_type = self.get_current_node_type()
-        if current_node_type == "LOAD":
+        if current_node_type == "Load":
             rospy.loginfo(f"🔄 [PROBLEM B] Detected LOAD node {self.current_node_id}! Executing East-South turn (135° right)...")
             self.handle_load_node()
             return
