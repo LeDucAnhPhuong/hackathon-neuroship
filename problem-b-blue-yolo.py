@@ -151,7 +151,7 @@ class JetBotController:
 
         self.LINE_REACQUIRE_TIMEOUT = 3.0
         self.SCAN_PIXEL_THRESHOLD = 80
-        self.YOLO_MODEL_PATH = "models/math/best_32.onnx"
+        self.YOLO_MODEL_PATH = "models/math/best_16.onnx"
         self.YOLO_CONF_THRESHOLD = 0.6
         self.YOLO_INPUT_SIZE = (640, 640)
         self.YOLO_CLASS_NAMES = ['N', 'E', 'W', 'S', 'NN', 'NE', 'NW', 'NS', 'math']
