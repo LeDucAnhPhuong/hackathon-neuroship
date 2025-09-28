@@ -57,7 +57,6 @@ class JetBotController:
         self.current_path_index = 0  # Track vị trí hiện tại trong planned_path
         self.banned_edges = []
         self.skip_first_detection = True  # Flag để bỏ qua detection đầu tiên ở startNode
-        self.processed_load_nodes = set()  # Track which load nodes have been processed to avoid duplicate scanning
         self.plan_initial_route()
 
         self.latest_scan = None
