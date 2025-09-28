@@ -354,6 +354,15 @@ class JetBotController:
                 size_bytes = image_size.to_bytes(4, byteorder='big')
                 client_socket.send(size_bytes)
 
+                # Send node_id size and data
+                node_id_str = str(self.current_node_id)
+                node_id_bytes = node_id_str.encode('utf-8')
+                node_id_size = len(node_id_bytes)
+                node_id_size_bytes = node_id_size.to_bytes(4, byteorder='big')
+                client_socket.send(node_id_size_bytes)
+                client_socket.send(node_id_bytes)
+                rospy.loginfo(f"📤 Sent node_id: {node_id_str}")
+
                 # Send image data
                 client_socket.send(image_data)
                 rospy.loginfo(f"📤 Sent image ({image_size} bytes) to server")
