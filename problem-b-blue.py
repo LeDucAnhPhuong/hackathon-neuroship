@@ -845,18 +845,18 @@ class JetBotController:
         Performs East-South turn (135° right), detects image, and submits information to server.
         """
         try:
-            # Submit LOAD node information to API
-            load_data = {
-                'type': 'LOAD_NODE_DETECTED',
-                'value': f'Reached LOAD node {self.current_node_id}',
-                'confidence': 1.0,
-                'position': {'x': 0, 'y': 0},
-                'node_id': self.current_node_id,
-                'action': 'east_south_turn'
-            }   
+            # # Submit LOAD node information to API
+            # load_data = {
+            #     'type': 'LOAD_NODE_DETECTED',
+            #     'value': f'Reached LOAD node {self.current_node_id}',
+            #     'confidence': 1.0,
+            #     'position': {'x': 0, 'y': 0},
+            #     'node_id': self.current_node_id,
+            #     'action': 'east_south_turn'
+            # }   
 
-            rospy.loginfo(f"📤 [PROBLEM B] Submitting LOAD node data: {load_data}")
-            self.submit_sign_detection(load_data)
+            # rospy.loginfo(f"📤 [PROBLEM B] Submitting LOAD node data: {load_data}")
+            # self.submit_sign_detection(load_data)
 
             # Perform East-South turn using dynamic angle calculation
             southeast_angle = self.get_southeast_turn_angle()

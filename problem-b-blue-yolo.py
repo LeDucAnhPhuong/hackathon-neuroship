@@ -356,13 +356,8 @@ class JetBotController:
                 # Kiểm tra xem line có xuất hiện trong cả hai ROI không để đảm bảo ổn định
                 lookahead_line = self._get_line_center(self.latest_image, self.LOOKAHEAD_ROI_Y, self.LOOKAHEAD_ROI_H)
                 execution_line = self._get_line_center(self.latest_image, self.ROI_Y, self.ROI_H)
-                rospy.loginfo(self.detect_with_yolo(self.latest_image)) # Chạy YOLO để làm nóng mô hình
-                # Đợi 5 giây
-                rospy.loginfo("Đang đợi 5 giây...")
-                rospy.sleep(5.0)
-                rospy.loginfo("Đã hoàn thành chờ 5 giây.")
-                # Giữ robot đứng yên
-                self.robot.stop()
+
+
                 if lookahead_line is not None and execution_line is not None:
                     rospy.loginfo("Đã tìm thấy vạch kẻ đường! Bắt đầu hành trình.")
                     self._set_state(RobotState.DRIVING_STRAIGHT)
@@ -1085,7 +1080,7 @@ class JetBotController:
             rospy.sleep(1.0)
 
             # Since AI model is not available, return default value
-            detection_result = "rectangle"
+            detection_result = self.detect_with_yolo(self.latest_image)
 
             rospy.loginfo(f"📷 [PROBLEM B] Image detection completed: {detection_result}")
             return detection_result
