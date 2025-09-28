@@ -153,7 +153,7 @@ class JetBotController:
         self.SCAN_PIXEL_THRESHOLD = 80
         self.YOLO_MODEL_PATH = "models/math/best_16.onnx"
         self.YOLO_CONF_THRESHOLD = 0.6
-        self.YOLO_INPUT_SIZE = (480, 640)
+        self.YOLO_INPUT_SIZE = (640, 480)
         self.YOLO_CLASS_NAMES = ['N', 'E', 'W', 'S', 'NN', 'NE', 'NW', 'NS', 'math']
         self.PRESCRIPTIVE_SIGNS = {'N', 'E', 'W', 'S'}
         self.PROHIBITIVE_SIGNS = {'NN', 'NE', 'NW', 'NS'}
@@ -347,7 +347,7 @@ class JetBotController:
             if self.current_state == RobotState.WAITING_FOR_LINE:
                 rospy.loginfo_throttle(5, "Đang ở trạng thái chờ... Tìm kiếm vạch kẻ đường để bắt đầu.")
                 
-
+                self.robot.stop()
                 # Kiểm tra xem đã có ảnh chưa
                 if self.latest_image is None:
                     rate.sleep()
