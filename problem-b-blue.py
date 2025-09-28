@@ -7,6 +7,7 @@ import time
 import os
 import json
 import math
+import socket
 from enum import Enum
 import requests
 
@@ -178,6 +179,11 @@ class JetBotController:
         # Codec 'MJPG' rất phổ biến và tương thích tốt
         self.VIDEO_FOURCC = cv2.VideoWriter_fourcc(*'MJPG')
 
+        # Socket server configuration for IOT
+        self.IMAGE_SERVER_HOST = "192.168.1.100"  # Replace with actual server IP on shared WiFi
+        self.IMAGE_SERVER_PORT = 8888
+        self.SOCKET_TIMEOUT = 5.0
+
     def initialize_hardware(self):
         try:
             self.robot = Robot()
@@ -316,6 +322,77 @@ class JetBotController:
             self.mqtt_client.connect(self.MQTT_BROKER, self.MQTT_PORT, 60)
             self.mqtt_client.loop_start()
         except Exception as e: rospy.logerr(f"Không thể kết nối MQTT: {e}")
+
+    def send_image_to_server(self, image):
+        """
+        Send image to socket server for classification.
+
+        Args:
+            image: OpenCV image (numpy array)
+
+        Returns:
+            dict: Server response with predictions or error
+        """
+        try:
+            if image is None:
+                return {"error": "No image provided"}
+
+            # Encode image as JPEG
+            _, buffer = cv2.imencode('.jpg', image)
+            image_data = buffer.tobytes()
+
+            # Connect to server
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.settimeout(self.SOCKET_TIMEOUT)
+
+            try:
+                rospy.loginfo(f"🔌 Connecting to image server at {self.IMAGE_SERVER_HOST}:{self.IMAGE_SERVER_PORT}")
+                client_socket.connect((self.IMAGE_SERVER_HOST, self.IMAGE_SERVER_PORT))
+
+                # Send image size first
+                image_size = len(image_data)
+                size_bytes = image_size.to_bytes(4, byteorder='big')
+                client_socket.send(size_bytes)
+
+                # Send image data
+                client_socket.send(image_data)
+                rospy.loginfo(f"📤 Sent image ({image_size} bytes) to server")
+
+                # Receive response size
+                response_size_data = client_socket.recv(4)
+                if len(response_size_data) < 4:
+                    return {"error": "Invalid response size from server"}
+
+                response_size = int.from_bytes(response_size_data, byteorder='big')
+
+                # Receive response
+                response_data = b''
+                while len(response_data) < response_size:
+                    chunk = client_socket.recv(min(4096, response_size - len(response_data)))
+                    if not chunk:
+                        break
+                    response_data += chunk
+
+                if len(response_data) == response_size:
+                    response = json.loads(response_data.decode('utf-8'))
+                    rospy.loginfo(f"📥 Socket received {len(response_data)} bytes from server")
+                    return response
+                else:
+                    rospy.logerr(f"⚠️ Incomplete response: received {len(response_data)}/{response_size} bytes")
+                    return {"error": "Incomplete response from server"}
+
+            except socket.timeout:
+                rospy.logerr(f"⏰ Socket timeout connecting to {self.IMAGE_SERVER_HOST}:{self.IMAGE_SERVER_PORT}")
+                return {"error": "Connection timeout"}
+            except socket.error as e:
+                rospy.logerr(f"🔌 Socket error: {e}")
+                return {"error": f"Socket error: {e}"}
+            finally:
+                client_socket.close()
+
+        except Exception as e:
+            rospy.logerr(f"❌ Error sending image to server: {e}")
+            return {"error": str(e)}
     
     def _set_state(self, new_state, initial=False):
         if self.current_state != new_state:
@@ -1072,7 +1149,7 @@ class JetBotController:
     def detect_image_after_turn(self):
         """
         Detect image after turning to southeast direction.
-        Currently returns default 'rectangle' string as AI model is not available.
+        Captures latest image and sends to socket server for classification.
         """
         try:
             rospy.loginfo("🔍 [PROBLEM B] Detecting image after southeast turn...")
@@ -1080,8 +1157,44 @@ class JetBotController:
             # Wait a moment for image to stabilize
             rospy.sleep(1.0)
 
-            # Since AI model is not available, return default value
-            detection_result = "rectangle"
+            # Check if we have latest image
+            if self.latest_image is None:
+                rospy.logwarn("⚠️ No latest image available, using default result")
+                return "rectangle"
+
+            # Send image to socket server for classification
+            rospy.loginfo("📤 [PROBLEM B] Sending image to server for classification...")
+            server_response = self.send_image_to_server(self.latest_image)
+
+            # Log full server response for debugging
+            rospy.loginfo(f"📥 [PROBLEM B] Full server response: {json.dumps(server_response, indent=2)}")
+
+            # Process server response
+            if 'error' in server_response:
+                rospy.logerr(f"❌ [PROBLEM B] Server error: {server_response['error']}")
+                detection_result = "rectangle"  # Default fallback
+            elif 'predictions' in server_response and server_response['predictions']:
+                # Get the class with highest confidence
+                predictions = server_response['predictions']
+                rospy.loginfo(f"📊 [PROBLEM B] Server returned {len(predictions)} prediction(s)")
+
+                for i, pred in enumerate(predictions):
+                    model_used = pred.get('model_used', 'unknown')
+                    class_name = pred.get('class', 'unknown')
+                    confidence = pred.get('confidence', 0)
+                    bbox = pred.get('bbox', [0, 0, 0, 0])
+                    rospy.loginfo(f"  Prediction {i+1}: {class_name} (confidence: {confidence:.3f}, model: {model_used}, bbox: {bbox})")
+
+                best_prediction = max(predictions, key=lambda x: x.get('confidence', 0))
+                detection_result = best_prediction.get('class', 'rectangle')
+                model_used = best_prediction.get('model_used', 'unknown')
+                confidence = best_prediction.get('confidence', 0)
+
+                rospy.loginfo(f"🎯 [PROBLEM B] FINAL RESULT: '{detection_result}' (confidence: {confidence:.3f}, model: {model_used})")
+            else:
+                rospy.logwarn("⚠️ [PROBLEM B] Server returned no predictions, using default")
+                rospy.loginfo(f"📋 [PROBLEM B] Empty predictions response: {server_response}")
+                detection_result = "rectangle"
 
             rospy.loginfo(f"📷 [PROBLEM B] Image detection completed: {detection_result}")
             return detection_result
