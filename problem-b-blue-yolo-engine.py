@@ -9,10 +9,7 @@ import json
 import math
 from enum import Enum
 import requests
-import tensorrt as trt
-import pycuda.driver as cuda
 
-import pycuda.autoinit  # khởi tạo CUDA context mặc định
 from jetbot import Robot
 import onnxruntime as ort
 from pyzbar.pyzbar import decode
@@ -154,7 +151,7 @@ class JetBotController:
 
         self.LINE_REACQUIRE_TIMEOUT = 3.0
         self.SCAN_PIXEL_THRESHOLD = 80
-        self.YOLO_MODEL_PATH = "models/math/yolov8n_fp16_math.engine"
+        self.YOLO_MODEL_PATH = "models/math/best_16.onnx"
         self.YOLO_CONF_THRESHOLD = 0.6
         self.YOLO_INPUT_SIZE = (640, 640)
         self.YOLO_CLASS_NAMES = ['N', 'E', 'W', 'S', 'NN', 'NE', 'NW', 'NS', 'math']
@@ -191,70 +188,13 @@ class JetBotController:
             self.robot = Mock()
 
     def initialize_yolo(self):
-        """Nạp YOLO TensorRT engine (.engine) và chuẩn bị context/buffer."""
+        """Tải mô hình YOLO vào ONNX Runtime."""
         try:
-            TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-            with open(self.YOLO_MODEL_PATH, "rb") as f:  # giờ trỏ đến file .engine
-                runtime = trt.Runtime(TRT_LOGGER)
-                self.trt_engine = runtime.deserialize_cuda_engine(f.read())
-            if self.trt_engine is None:
-                raise RuntimeError("deserialize_cuda_engine trả về None")
-
-            self.trt_context = self.trt_engine.create_execution_context()
-
-            # Xác định kích thước input động/tĩnh và set về (1,3,H,W)
-            # self.YOLO_INPUT_SIZE là (W, H)
-            W, H = self.YOLO_INPUT_SIZE
-            self.input_binding_idx = None
-            self.output_binding_idxs = []
-
-            self.bindings = [None] * self.trt_engine.num_bindings
-            self.host_buffers = [None] * self.trt_engine.num_bindings
-            self.device_buffers = [None] * self.trt_engine.num_bindings
-            self.binding_shapes = [None] * self.trt_engine.num_bindings
-
-            for i in range(self.trt_engine.num_bindings):
-                name = self.trt_engine.get_binding_name(i)
-                is_input = self.trt_engine.binding_is_input(i)
-                dtype = trt.nptype(self.trt_engine.get_binding_dtype(i))
-
-                if is_input:
-                    # Giả định batch=1, NCHW
-                    shape = (1, 3, H, W)
-                    # Nếu engine là dynamic shape, cần set shape trước khi allocate
-                    if -1 in self.trt_engine.get_binding_shape(i):
-                        self.trt_context.set_binding_shape(i, shape)
-                    else:
-                        shape = tuple(self.trt_engine.get_binding_shape(i))
-                    self.input_binding_idx = i
-                    self.binding_shapes[i] = shape
-                    nbytes = np.prod(shape) * np.dtype(dtype).itemsize
-                    self.host_buffers[i] = cuda.pagelocked_empty(nbytes // np.dtype(dtype).itemsize, dtype)
-                    self.device_buffers[i] = cuda.mem_alloc(nbytes)
-                    self.bindings[i] = int(self.device_buffers[i])
-                else:
-                    # Output có thể là dynamic; lấy shape từ context sau khi đã set input shape
-                    shape = tuple(self.trt_context.get_binding_shape(i))
-                    # Nếu vẫn có -1 thì nhiều engine sẽ resolve sau khi execute; ta vẫn allocate theo kích
-                    # thước "tối đa" khó biết trước. Cách an toàn: thực thi 1 lần "warmup" sau để cập nhật.
-                    # Tạm thời allocate theo size tính được (nếu có -1, ước lượng theo YOLO: (1, N, C) hoặc (1, C, N))
-                    # Ở đa số build Ultralytics-TRT, output là (1, N, 84/85) hoặc (1, 84/85, N).
-                    # Nếu shape chưa resolve, giả định N=8400, C=84 (640x640), bạn chỉnh nếu engine khác.
-                    if -1 in shape:
-                        shape = (1, 8400, 84)
-                    self.binding_shapes[i] = shape
-                    nbytes = np.prod(shape) * np.dtype(dtype).itemsize
-                    self.host_buffers[i] = cuda.pagelocked_empty(nbytes // np.dtype(dtype).itemsize, dtype)
-                    self.device_buffers[i] = cuda.mem_alloc(nbytes)
-                    self.bindings[i] = int(self.device_buffers[i])
-                    self.output_binding_idxs.append(i)
-
-            rospy.loginfo("Tải YOLO TensorRT engine thành công.")
+            self.yolo_session = ort.InferenceSession(self.YOLO_MODEL_PATH, providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+            rospy.loginfo("Tải mô hình YOLO thành công.")
         except Exception as e:
-            rospy.logerr(f"Không thể tải TensorRT engine từ '{self.YOLO_MODEL_PATH}'. Lỗi: {e}")
-            self.trt_engine = None
-            self.trt_context = None
-
+            rospy.logerr(f"Không thể tải mô hình YOLO từ '{self.YOLO_MODEL_PATH}'. Lỗi: {e}")
+            self.yolo_session = None
 
     def numpy_nms(self, boxes, scores, iou_threshold):
         """
@@ -299,115 +239,73 @@ class JetBotController:
 
     def detect_with_yolo(self, image):
         """
-        Suy luận bằng TensorRT engine (YOLOv8) và hậu xử lý kết quả.
-        Trả về: list dict {class_name, confidence, box=[x1,y1,x2,y2]}
+        Thực hiện nhận diện đối tượng bằng YOLOv8 và hậu xử lý kết quả đúng cách.
         """
-        if self.trt_engine is None or self.trt_context is None:
-            return []
+        if self.yolo_session is None: return []
 
         original_height, original_width = image.shape[:2]
-        W, H = self.YOLO_INPUT_SIZE  # (W,H)
 
-        # --- 1) Preprocess: resize -> normalize -> CHW -> contiguous float32 ---
-        img_resized = cv2.resize(image, (W, H))
-        img_data = img_resized.astype(np.float32) / 255.0
-        img_data = np.transpose(img_data, (2, 0, 1))  # HWC -> CHW
-        input_blob = np.expand_dims(img_data, axis=0).copy()  # (1,3,H,W)
-        input_blob = np.ascontiguousarray(input_blob, dtype=self.host_buffers[self.input_binding_idx].dtype)
+        img_resized = cv2.resize(image, self.YOLO_INPUT_SIZE)
+        img_data = np.array(img_resized, dtype=np.float32) / 255.0
+        img_data = np.transpose(img_data, (2, 0, 1))  # HWC to CHW
+        input_tensor = np.expand_dims(img_data, axis=0)  # Add batch dimension
 
-        # Copy host->device input
-        cuda.memcpy_htod(self.device_buffers[self.input_binding_idx], input_blob)
+        input_name = self.yolo_session.get_inputs()[0].name
+        outputs = self.yolo_session.run(None, {input_name: input_tensor})
 
-        # --- 2) Execute ---
-        # Nếu engine output là dynamic, lần chạy này sẽ giúp context resolve shape thực,
-        # Sau đó có thể cần re-allocate. Với đa số build YOLOv8-TRT, allocation ở trên là đủ.
-        self.trt_context.execute_v2(self.bindings)
+        # Lấy output thô, output của YOLOv8 thường có shape (1, 84, 8400) hoặc tương tự
+        # Chúng ta cần transpose nó thành (1, 8400, 84) để dễ xử lý
+        predictions = np.squeeze(outputs[0]).T
 
-        # --- 3) Copy device->host outputs ---
-        outputs = []
-        for out_idx in self.output_binding_idxs:
-            # Nếu shape output thay đổi (dynamic), cập nhật lại trước khi copy
-            shape_now = tuple(self.trt_context.get_binding_shape(out_idx))
-            if np.prod(shape_now) != np.prod(self.binding_shapes[out_idx]):
-                # Re-allocate khi cần (edge case)
-                dtype = self.host_buffers[out_idx].dtype
-                self.binding_shapes[out_idx] = shape_now
-                nbytes = np.prod(shape_now) * np.dtype(dtype).itemsize
-                self.host_buffers[out_idx] = cuda.pagelocked_empty(nbytes // np.dtype(dtype).itemsize, dtype)
-                self.device_buffers[out_idx].free()
-                self.device_buffers[out_idx] = cuda.mem_alloc(nbytes)
-                self.bindings[out_idx] = int(self.device_buffers[out_idx])
-                # Chạy lại để đổ dữ liệu vào buffer mới
-                self.trt_context.execute_v2(self.bindings)
+        # Lọc các box có điểm tin cậy (objectness score) thấp
+        # Cột 4 trong predictions là điểm tin cậy tổng thể của box
+        scores = np.max(predictions[:, 4:], axis=1)
+        predictions = predictions[scores > self.YOLO_CONF_THRESHOLD, :]
+        scores = scores[scores > self.YOLO_CONF_THRESHOLD]
 
-            host_arr = self.host_buffers[out_idx]
-            cuda.memcpy_dtoh(host_arr, self.device_buffers[out_idx])
-            outputs.append(np.array(host_arr).reshape(self.binding_shapes[out_idx]))
-
-        # --- 4) Giải mã đầu ra YOLO (tùy engine build có thể khác đôi chút) ---
-        # Ta cố gắng handle 2 format phổ biến:
-        #   A) (1, N, 84/85)  -> squeeze -> (N, 84/85)
-        #   B) (1, 84/85, N)  -> squeeze -> transpose -> (N, 84/85)
-        # Nếu có nhiều output tensor, thường tensor đầu tiên là predictions.
-        preds = outputs[0].squeeze()
-        if preds.ndim == 3:
-            # Hiếm gặp, thử lấy batch=0
-            preds = preds[0]
-        if preds.shape[0] in (84, 85) and preds.shape[1] > preds.shape[0]:
-            preds = preds.T  # (C, N) -> (N, C)
-
-        # Bây giờ kỳ vọng preds shape: (N, 84/85)
-        # Ultralytics: 4 box + 1 obj + 80 cls = 85; Một số build bỏ obj -> 84
-        C = preds.shape[1]
-        has_obj = (C == 85)
-        box_xywh = preds[:, 0:4]
-        if has_obj:
-            obj_conf = preds[:, 4]
-            cls_scores = preds[:, 5:]
-            scores = obj_conf * np.max(cls_scores, axis=1)
-            class_ids = np.argmax(cls_scores, axis=1)
-        else:
-            # Không có objectness: lấy max trực tiếp từ cls scores (cột 4 trở đi)
-            cls_scores = preds[:, 4:]
-            scores = np.max(cls_scores, axis=1)
-            class_ids = np.argmax(cls_scores, axis=1)
-
-        # --- 5) Lọc theo CONF ---
-        keep = scores > self.YOLO_CONF_THRESHOLD
-        if not np.any(keep):
+        if predictions.shape[0] == 0:
             rospy.loginfo("YOLO không phát hiện đối tượng nào vượt ngưỡng tin cậy.")
             return []
-        box_xywh = box_xywh[keep]
-        scores = scores[keep]
-        class_ids = class_ids[keep]
 
-        # --- 6) Chuyển xywh (tỷ lệ input) về toạ độ gốc ---
-        x, y, w, h = box_xywh[:, 0], box_xywh[:, 1], box_xywh[:, 2], box_xywh[:, 3]
-        x_scale = original_width / float(W)
-        y_scale = original_height / float(H)
+        # Lấy class_id có điểm cao nhất
+        class_ids = np.argmax(predictions[:, 4:], axis=1)
+
+        # Lấy tọa độ box và chuyển đổi về ảnh gốc
+        x, y, w, h = predictions[:, 0], predictions[:, 1], predictions[:, 2], predictions[:, 3]
+        
+        # Tính toán tỷ lệ scale để chuyển đổi tọa độ
+        x_scale = original_width / self.YOLO_INPUT_SIZE[0]
+        y_scale = original_height / self.YOLO_INPUT_SIZE[1]
+
+        # Chuyển từ [center_x, center_y, width, height] sang [x1, y1, x2, y2]
         x1 = (x - w / 2) * x_scale
         y1 = (y - h / 2) * y_scale
         x2 = (x + w / 2) * x_scale
         y2 = (y + h / 2) * y_scale
-        boxes = np.column_stack([x1, y1, x2, y2])
-
-        # --- 7) NMS ---
-        indices = self.numpy_nms(boxes.astype(np.float32), scores.astype(np.float32), 0.45)
+        
+        # Chuyển thành list các box và scores
+        boxes = np.column_stack((x1, y1, x2, y2)).tolist()
+        
+        # 4. Thực hiện Non-Maximum Suppression (NMS)
+        # Đây là một bước cực kỳ quan trọng để loại bỏ các box trùng lặp
+        # OpenCV cung cấp một hàm NMS hiệu quả
+        nms_threshold = 0.45 # Ngưỡng IOU để loại bỏ box
+        indices = self.numpy_nms(np.array(boxes), scores, nms_threshold)
+        
         if len(indices) == 0:
             rospy.loginfo("YOLO: Sau NMS, không còn đối tượng nào.")
             return []
 
-        # --- 8) Kết quả cuối cùng ---
+        # 5. Tạo danh sách kết quả cuối cùng
         final_detections = []
         for i in indices.flatten():
-            cid = int(class_ids[i])
             final_detections.append({
-                "class_name": self.YOLO_CLASS_NAMES[cid] if 0 <= cid < len(self.YOLO_CLASS_NAMES) else str(cid),
-                "confidence": float(scores[i]),
-                "box": [int(v) for v in boxes[i]]
+                'class_name': self.YOLO_CLASS_NAMES[class_ids[i]],
+                'confidence': float(scores[i]),
+                'box': [int(coord) for coord in boxes[i]] # Chuyển tọa độ sang int
             })
 
-        rospy.loginfo(f"YOLO (TensorRT) phát hiện {len(final_detections)} đối tượng.")
+        rospy.loginfo(f"YOLO đã phát hiện {len(final_detections)} đối tượng cuối cùng.")
         return final_detections
 
     def initialize_mqtt(self):
