@@ -153,7 +153,7 @@ class JetBotController:
         self.SCAN_PIXEL_THRESHOLD = 80
         self.YOLO_MODEL_PATH = "models/math/best_16.onnx"
         self.YOLO_CONF_THRESHOLD = 0.6
-        self.YOLO_INPUT_SIZE = (640, 640)
+        self.YOLO_INPUT_SIZE = (480, 480)
         self.YOLO_CLASS_NAMES = ['N', 'E', 'W', 'S', 'NN', 'NE', 'NW', 'NS', 'math']
         self.PRESCRIPTIVE_SIGNS = {'N', 'E', 'W', 'S'}
         self.PROHIBITIVE_SIGNS = {'NN', 'NE', 'NW', 'NS'}
@@ -356,7 +356,7 @@ class JetBotController:
                 # Kiểm tra xem line có xuất hiện trong cả hai ROI không để đảm bảo ổn định
                 lookahead_line = self._get_line_center(self.latest_image, self.LOOKAHEAD_ROI_Y, self.LOOKAHEAD_ROI_H)
                 execution_line = self._get_line_center(self.latest_image, self.ROI_Y, self.ROI_H)
-                self.detect_with_yolo(self.latest_image) # Chạy YOLO để làm nóng mô hình
+                rospy.loginfo(self.detect_with_yolo(self.latest_image)) # Chạy YOLO để làm nóng mô hình
                 # Đợi 5 giây
                 rospy.loginfo("Đang đợi 5 giây...")
                 rospy.sleep(5.0)
