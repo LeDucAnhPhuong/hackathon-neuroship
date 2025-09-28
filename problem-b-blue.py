@@ -57,6 +57,7 @@ class JetBotController:
         self.current_path_index = 0  # Track vị trí hiện tại trong planned_path
         self.banned_edges = []
         self.skip_first_detection = True  # Flag để bỏ qua detection đầu tiên ở startNode
+        self.processed_load_nodes = set()  # Track which load nodes have been processed to avoid duplicate scanning
         self.plan_initial_route()
 
         self.latest_scan = None
@@ -543,10 +544,12 @@ class JetBotController:
             
             # Chuẩn bị payload
             payload = {
-                'text': 'rectangle', #hardcoded now need replace later
                 'node_id': self.current_node_id,
-                'token': self.API_TOKEN,
-                'map_type': self.MAP_TYPE,
+                'timestamp': rospy.get_time(),
+                'sign_type': sign_data.get('type'),
+                'sign_value': sign_data.get('value'),
+                'confidence': sign_data.get('confidence', 1.0),
+                'robot_position': sign_data.get('position', {'x': 0, 'y': 0})
             }
             
             rospy.loginfo(f"🚀 Gửi sign detection lên API: {payload}")
@@ -617,12 +620,12 @@ class JetBotController:
             target_idx = (current_idx - 1 + 4) % 4
         else:
             return None
-        
+
         for label, direction in self.LABEL_TO_DIRECTION_ENUM.items():
             if direction.value == target_idx:
                 return label
         return None
-    
+
     def get_southeast_turn_angle(self):
         """
         Calculate the turn angle needed to face southeast based on current robot direction.
@@ -759,8 +762,7 @@ class JetBotController:
                 rospy.loginfo(f"🔄 [PROBLEM B] Detected new LOAD node {self.current_node_id}! Executing turn to southeast...")
                 self.handle_load_node()
                 self.processed_load_nodes.add(self.current_node_id)
-                rospy.loginfo(f"🔄 [PROBLEM B] Added node {self.current_node_id} to processed load nodes. Total processed: {len(self.processed_load_nodes)}")B] Detected LOAD node {self.current_node_id}! Executing East-South turn (135° right)...")
-            self.handle_load_node()
+                rospy.loginfo(f"🔄 [PROBLEM B] Added node {self.current_node_id} to processed load nodes. Total processed: {len(self.processed_load_nodes)}")
             self.process_intersection_detections([])
             return
 
@@ -856,11 +858,12 @@ class JetBotController:
             rospy.loginfo(f"📤 [PROBLEM B] Submitting LOAD node data: {load_data}")
             self.submit_sign_detection(load_data)
 
-            # Perform East-South turn (135° right turn)
-            rospy.loginfo("🔄 [PROBLEM B] Executing East-South turn (135° right)...")
-            self.turn_robot(45, True)
+            # Perform East-South turn using dynamic angle calculation
+            southeast_angle = self.get_southeast_turn_angle()
+            rospy.loginfo(f"🔄 [PROBLEM B] Executing turn to southeast ({southeast_angle}° from {self.DIRECTIONS[self.current_direction_index].name})...")
+            self.turn_robot(southeast_angle, True)
 
-            # Detect image after turning 135 degrees
+            # Detect image after turning to southeast
             detection_result = self.detect_image_after_turn()
             rospy.loginfo(f"🔍 [PROBLEM B] Image detection result: {detection_result}")
 
@@ -869,7 +872,7 @@ class JetBotController:
 
             # Turn back (opposite direction)
             rospy.loginfo("🔄 [PROBLEM B] Turning back after detection...")
-            self.turn_robot(-45, True)
+            self.turn_robot(-southeast_angle, True)
 
             # After turning, continue with normal intersection logic
             rospy.loginfo("✅ [PROBLEM B] LOAD node handling completed. Continuing with navigation...")
@@ -1068,11 +1071,11 @@ class JetBotController:
 
     def detect_image_after_turn(self):
         """
-        Detect image after turning 135 degrees.
+        Detect image after turning to southeast direction.
         Currently returns default 'rectangle' string as AI model is not available.
         """
         try:
-            rospy.loginfo("🔍 [PROBLEM B] Detecting image after 135° turn...")
+            rospy.loginfo("🔍 [PROBLEM B] Detecting image after southeast turn...")
 
             # Wait a moment for image to stabilize
             rospy.sleep(1.0)
@@ -1100,7 +1103,7 @@ class JetBotController:
                 'position': {'x': 0, 'y': 0},
                 'node_id': self.current_node_id,
                 'timestamp': rospy.get_time(),
-                'detection_method': '135_degree_turn'
+                'detection_method': 'southeast_turn'
             }
 
             rospy.loginfo(f"📤 [PROBLEM B] Submitting detection result to API: {detection_data}")
