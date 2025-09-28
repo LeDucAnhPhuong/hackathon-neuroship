@@ -384,11 +384,11 @@ class JetBotController:
 
                 if len(response_data) == response_size:
                     response = json.loads(response_data.decode('utf-8'))
-                    rospy.loginfo(f"📥 Socket received {len(response_data)} bytes from server")
+                    rospy.loginfo(f"📥 Socket received acknowledgment from server: {response}")
                     return response
                 else:
                     rospy.logerr(f"⚠️ Incomplete response: received {len(response_data)}/{response_size} bytes")
-                    return {"error": "Incomplete response from server"}
+                    return {"status": "error", "error": "Incomplete response from server"}
 
             except socket.timeout:
                 rospy.logerr(f"⏰ Socket timeout connecting to {self.IMAGE_SERVER_HOST}:{self.IMAGE_SERVER_PORT}")
@@ -613,61 +613,15 @@ class JetBotController:
             
         rospy.loginfo("Đã giải phóng tài nguyên. Chương trình kết thúc.")
 
-    def submit_sign_detection(self, sign_data):
-        """
-        Gửi dữ liệu sign detection lên server API.
-        
-        Args:
-            sign_data (dict): Dữ liệu sign với format {
-                'type': 'QR_CODE' hoặc 'MATH_PROBLEM',
-                'value': 'nội dung đã decode/giải',
-                'confidence': float (optional),
-                'position': {'x': float, 'y': float} (optional)
-            }
-        """
-        try:
-            api_url = f"https://hackathon2025-dev.fpt.edu.vn/api/signs/submit/?token={self.API_TOKEN}"
-            
-            # Chuẩn bị payload
-            payload = {
-                'node_id': self.current_node_id,
-                'timestamp': rospy.get_time(),
-                'sign_type': sign_data.get('type'),
-                'sign_value': sign_data.get('value'),
-                'confidence': sign_data.get('confidence', 1.0),
-                'robot_position': sign_data.get('position', {'x': 0, 'y': 0})
-            }
-            
-            rospy.loginfo(f"🚀 Gửi sign detection lên API: {payload}")
-            
-            response = requests.post(api_url, json=payload, timeout=5)
-            
-            if response.status_code == 200:
-                result = response.json()
-                rospy.loginfo(f"✅ Submit thành công! Server response: {result}")
-                return True
-            else:
-                rospy.logwarn(f"⚠️ Submit failed với status {response.status_code}: {response.text}")
-                return False
-                
-        except requests.RequestException as e:
-            rospy.logerr(f"❌ Lỗi network khi submit sign: {e}")
-            return False
-        except Exception as e:
-            rospy.logerr(f"❌ Lỗi không xác định khi submit sign: {e}")
-            return False
 
     def publish_data(self, data):
-        """Legacy method - giữ lại để tương thích ngược và thêm API submission"""
+        """Legacy method - only publish via MQTT"""
         try:
             # Publish qua MQTT như cũ
             data_json = json.dumps(data)
             self.mqtt_client.publish(self.MQTT_DATA_TOPIC, data_json)
             rospy.loginfo(f"Published to MQTT: {data}")
-            
-            # Đồng thời submit lên API
-            self.submit_sign_detection(data)
-            
+
         except Exception as e:
             rospy.logerr(f"Lỗi khi publish data: {e}")
 
@@ -953,8 +907,7 @@ class JetBotController:
             detection_result = self.detect_image_after_turn()
             rospy.loginfo(f"🔍 [PROBLEM B] Image detection result: {detection_result}")
 
-            # Submit detection result to API
-            self.submit_detection_result(detection_result)
+            # The detection result is now automatically submitted by the server
 
             # Turn back (opposite direction)
             rospy.loginfo("🔄 [PROBLEM B] Turning back after detection...")
@@ -1171,39 +1124,23 @@ class JetBotController:
                 rospy.logwarn("⚠️ No latest image available, using default result")
                 return "rectangle"
 
-            # Send image to socket server for classification
-            rospy.loginfo("📤 [PROBLEM B] Sending image to server for classification...")
+            # Send image to socket server for classification and automatic submission
+            rospy.loginfo("📤 [PROBLEM B] Sending image to server for classification and automatic submission...")
             server_response = self.send_image_to_server(self.latest_image)
 
-            # Log full server response for debugging
-            rospy.loginfo(f"📥 [PROBLEM B] Full server response: {json.dumps(server_response, indent=2)}")
+            # Log server response for debugging
+            rospy.loginfo(f"📥 [PROBLEM B] Server response: {json.dumps(server_response, indent=2)}")
 
             # Process server response
-            if 'error' in server_response:
-                rospy.logerr(f"❌ [PROBLEM B] Server error: {server_response['error']}")
-                detection_result = "rectangle"  # Default fallback
-            elif 'predictions' in server_response and server_response['predictions']:
-                # Get the class with highest confidence
-                predictions = server_response['predictions']
-                rospy.loginfo(f"📊 [PROBLEM B] Server returned {len(predictions)} prediction(s)")
-
-                for i, pred in enumerate(predictions):
-                    model_used = pred.get('model_used', 'unknown')
-                    class_name = pred.get('class', 'unknown')
-                    confidence = pred.get('confidence', 0)
-                    bbox = pred.get('bbox', [0, 0, 0, 0])
-                    rospy.loginfo(f"  Prediction {i+1}: {class_name} (confidence: {confidence:.3f}, model: {model_used}, bbox: {bbox})")
-
-                best_prediction = max(predictions, key=lambda x: x.get('confidence', 0))
-                detection_result = best_prediction.get('class', 'rectangle')
-                model_used = best_prediction.get('model_used', 'unknown')
-                confidence = best_prediction.get('confidence', 0)
-
-                rospy.loginfo(f"🎯 [PROBLEM B] FINAL RESULT: '{detection_result}' (confidence: {confidence:.3f}, model: {model_used})")
+            if server_response.get('status') == 'success':
+                detection_result = server_response.get('detected', 'rectangle')
+                rospy.loginfo(f"✅ [PROBLEM B] Server successfully detected and submitted: {detection_result}")
+            elif server_response.get('status') == 'error':
+                detection_result = server_response.get('detected', 'rectangle')
+                rospy.logwarn(f"⚠️ [PROBLEM B] Server detected '{detection_result}' but submission failed")
             else:
-                rospy.logwarn("⚠️ [PROBLEM B] Server returned no predictions, using default")
-                rospy.loginfo(f"📋 [PROBLEM B] Empty predictions response: {server_response}")
-                detection_result = "rectangle"
+                rospy.logerr(f"❌ [PROBLEM B] Unexpected server response format: {server_response}")
+                detection_result = "rectangle"  # Default fallback
 
             rospy.loginfo(f"📷 [PROBLEM B] Image detection completed: {detection_result}")
             return detection_result
@@ -1212,34 +1149,6 @@ class JetBotController:
             rospy.logerr(f"❌ Error in image detection: {e}")
             return "rectangle"  # Default fallback
 
-    def submit_detection_result(self, detection_result):
-        """
-        Submit detection result to API server with proper logging.
-        """
-        try:
-            # Prepare detection data for API submission
-            detection_data = {
-                'type': 'IMAGE_DETECTION',
-                'value': detection_result,
-                'confidence': 1.0,
-                'position': {'x': 0, 'y': 0},
-                'node_id': self.current_node_id,
-                'timestamp': rospy.get_time(),
-                'detection_method': 'southeast_turn'
-            }
-
-            rospy.loginfo(f"📤 [PROBLEM B] Submitting detection result to API: {detection_data}")
-
-            # Submit to API
-            success = self.submit_sign_detection(detection_data)
-
-            if success:
-                rospy.loginfo("✅ [PROBLEM B] Detection result successfully submitted to API")
-            else:
-                rospy.logwarn("⚠️ [PROBLEM B] Failed to submit detection result to API")
-
-        except Exception as e:
-            rospy.logerr(f"❌ [PROBLEM B] Error submitting detection result: {e}")
 
     def update_navigation_after_load_turn(self):
         """
