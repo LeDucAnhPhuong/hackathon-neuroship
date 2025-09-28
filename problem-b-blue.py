@@ -180,7 +180,7 @@ class JetBotController:
         self.VIDEO_FOURCC = cv2.VideoWriter_fourcc(*'MJPG')
 
         # Socket server configuration for IOT
-        self.IMAGE_SERVER_HOST = "192.168.1.100"  # Replace with actual server IP on shared WiFi
+        self.IMAGE_SERVER_HOST = "10.13.1.73"  # Replace with actual server IP on shared WiFi
         self.IMAGE_SERVER_PORT = 8888
         self.SOCKET_TIMEOUT = 5.0
 
