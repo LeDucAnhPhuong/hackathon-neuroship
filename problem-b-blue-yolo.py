@@ -346,7 +346,7 @@ class JetBotController:
             # ===================================================================
             if self.current_state == RobotState.WAITING_FOR_LINE:
                 rospy.loginfo_throttle(5, "Đang ở trạng thái chờ... Tìm kiếm vạch kẻ đường để bắt đầu.")
-                
+                self.detect_with_yolo(self.latest_image) # Chạy YOLO để làm nóng mô hình
                 # Giữ robot đứng yên
                 self.robot.stop()
 
