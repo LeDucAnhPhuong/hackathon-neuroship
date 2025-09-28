@@ -346,13 +346,7 @@ class JetBotController:
             # ===================================================================
             if self.current_state == RobotState.WAITING_FOR_LINE:
                 rospy.loginfo_throttle(5, "Đang ở trạng thái chờ... Tìm kiếm vạch kẻ đường để bắt đầu.")
-                self.detect_with_yolo(self.latest_image) # Chạy YOLO để làm nóng mô hình
-                # Đợi 5 giây
-                rospy.loginfo("Đang đợi 5 giây...")
-                rospy.sleep(5.0)
-                rospy.loginfo("Đã hoàn thành chờ 5 giây.")
-                # Giữ robot đứng yên
-                self.robot.stop()
+                
 
                 # Kiểm tra xem đã có ảnh chưa
                 if self.latest_image is None:
@@ -362,7 +356,13 @@ class JetBotController:
                 # Kiểm tra xem line có xuất hiện trong cả hai ROI không để đảm bảo ổn định
                 lookahead_line = self._get_line_center(self.latest_image, self.LOOKAHEAD_ROI_Y, self.LOOKAHEAD_ROI_H)
                 execution_line = self._get_line_center(self.latest_image, self.ROI_Y, self.ROI_H)
-
+                self.detect_with_yolo(self.latest_image) # Chạy YOLO để làm nóng mô hình
+                # Đợi 5 giây
+                rospy.loginfo("Đang đợi 5 giây...")
+                rospy.sleep(5.0)
+                rospy.loginfo("Đã hoàn thành chờ 5 giây.")
+                # Giữ robot đứng yên
+                self.robot.stop()
                 if lookahead_line is not None and execution_line is not None:
                     rospy.loginfo("Đã tìm thấy vạch kẻ đường! Bắt đầu hành trình.")
                     self._set_state(RobotState.DRIVING_STRAIGHT)
